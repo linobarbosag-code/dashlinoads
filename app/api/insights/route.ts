@@ -1,16 +1,23 @@
-// app/api/insights/route.ts
-// Insights sob demanda: valida a sessão, confere se o usuário tem acesso
-// à conta pedida (via RLS) e chama a Meta ao vivo (botão "Atualizar agora").
+// app/api/insights/route.ts — v2
+// ?client_id=...&since=YYYY-MM-DD&until=YYYY-MM-DD&objetivo=auto|compras|leads|conversas|engajamento&level=campaign|adset|ad
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import {
-  getAccountInsights,
-  getCampaignInsights,
-  getDailyInsights,
+  getInsights,
+  getDaily,
+  getBreakdown,
+  previousRange,
+  detectObjetivo,
   extractResult,
-  type DatePreset,
-} from "@/lib/meta";
+  extractRoas,
+  buildFunnel,
+  RESULT_META,
+  type Objetivo,
+  type Range,
+} from "@/lib/meta-v2";
+
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   const supabase = createClient();
@@ -21,35 +28,76 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
   }
 
-  const clientId = req.nextUrl.searchParams.get("client_id");
-  const preset = (req.nextUrl.searchParams.get("period") ??
-    "last_7d") as DatePreset;
+  const sp = req.nextUrl.searchParams;
+  const clientId = sp.get("client_id");
+  const since = sp.get("since");
+  const until = sp.get("until");
+  const objetivoParam = (sp.get("objetivo") ?? "auto") as Objetivo;
+  const level = (sp.get("level") ?? "campaign") as "campaign" | "adset" | "ad";
 
-  // RLS resolve o acesso: se o select retornar vazio, o usuário não tem vínculo.
+  if (!since || !until || !/^\d{4}-\d{2}-\d{2}$/.test(since) || !/^\d{4}-\d{2}-\d{2}$/.test(until)) {
+    return NextResponse.json({ error: "Período inválido" }, { status: 400 });
+  }
+  const range: Range = { since, until };
+
+  // RLS decide o acesso
   const { data: client } = await supabase
     .from("clients")
     .select("id, name, ad_account_id, currency")
     .eq("id", clientId)
     .single();
-
   if (!client) {
     return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
   }
 
   try {
-    const [account, campaigns, daily] = await Promise.all([
-      getAccountInsights(client.ad_account_id, preset),
-      getCampaignInsights(client.ad_account_id, preset),
-      getDailyInsights(client.ad_account_id, preset),
-    ]);
+    const prev = previousRange(range);
+    const [curArr, prevArr, rows, daily, gender, platform] =
+      await Promise.all([
+        getInsights(client.ad_account_id, range, "account"),
+        getInsights(client.ad_account_id, prev, "account"),
+        getInsights(client.ad_account_id, range, level),
+        getDaily(client.ad_account_id, range),
+        getBreakdown(client.ad_account_id, range, "gender"),
+        getBreakdown(client.ad_account_id, range, "publisher_platform"),
+      ]);
+
+    const cur = curArr[0] ?? null;
+    const prv = prevArr[0] ?? null;
+
+    const objetivo =
+      objetivoParam === "auto"
+        ? cur
+          ? detectObjetivo(cur)
+          : "leads"
+        : objetivoParam;
+
+    const enrich = (i: any) => ({
+      ...i,
+      ...extractResult(i, objetivo),
+      roas: extractRoas(i),
+    });
 
     return NextResponse.json({
       client: { name: client.name, currency: client.currency },
-      account: account
-        ? { ...account, ...extractResult(account) }
-        : null,
-      campaigns: campaigns.map((c) => ({ ...c, ...extractResult(c) })),
+      objetivo,
+      meta: RESULT_META[objetivo],
+      account: cur ? enrich(cur) : null,
+      previous: prv ? enrich(prv) : null,
+      funnel: cur ? buildFunnel(cur, objetivo) : [],
+      rows: rows.map(enrich),
+      level,
       daily,
+      gender: gender.map((g: any) => ({
+        gender: g.gender,
+        spend: Number(g.spend || 0),
+        results: extractResult(g, objetivo).results,
+      })),
+      platform: platform.map((p: any) => ({
+        platform: p.publisher_platform,
+        spend: Number(p.spend || 0),
+        results: extractResult(p, objetivo).results,
+      })),
       fetched_at: new Date().toISOString(),
     });
   } catch (err: any) {

@@ -1,16 +1,7 @@
-// components/dashboard-view.tsx — LinoADS v2
+// components/dashboard-view.tsx — port fiel do design "Dashboard LinoADS v2" (somente Meta Ads)
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from "recharts";
+import { useEffect, useMemo, useState, useCallback } from "react";
 
 interface Client {
   id: string;
@@ -19,42 +10,102 @@ interface Client {
   currency: string;
 }
 
-const PERIODS = [
-  { value: "today", label: "Hoje" },
-  { value: "yesterday", label: "Ontem" },
-  { value: "last_7d", label: "7 dias" },
-  { value: "last_14d", label: "14 dias" },
-  { value: "last_30d", label: "30 dias" },
-  { value: "this_month", label: "Este mês" },
+// ===== Tokens do design =====
+const NAVY = "#1A1442";
+const MUTED = "#9096AA";
+const MUTED2 = "#A0A4B4";
+const INK2 = "#4A4568";
+const BORDER = "#E2E4EE";
+const CARD_BORDER = "#ECEDF3";
+const GREEN = "#12A66A";
+const CARD: React.CSSProperties = {
+  background: "#fff",
+  border: `1px solid ${CARD_BORDER}`,
+  borderRadius: 18,
+  boxShadow: "0 1px 2px rgba(20,15,50,.04)",
+};
+const DISPLAY = "'Space Grotesk', sans-serif";
+const BODY = "'Plus Jakarta Sans', sans-serif";
+
+const CLIENT_COLORS = ["#E8336E", "#EF5A57", "#F5813C", "#F7A233", "#D9308A", "#EF6D2E"];
+const CLIENT_TINTS = ["#FCE7EF", "#FDE9E8", "#FDEEE1", "#FDF0DE", "#FBE6F1", "#FDECE2"];
+const FUNNEL_COLORS = ["#E8336E", "#EF5A57", "#F26D33", "#F5813C", "#F7A233", "#F9C22E"];
+const SEG_COLORS = ["#E8336E", "#F5813C", "#F9C22E", "#12A66A", "#8B5CF6"];
+
+const OBJ_OPTIONS = [
+  { key: "auto", label: "Automático" },
+  { key: "compras", label: "E-commerce (Compras)" },
+  { key: "leads", label: "Cadastro (Leads)" },
+  { key: "conversas", label: "Mensagem (Conversas)" },
+  { key: "engajamento", label: "Engajamento" },
 ];
 
-const RESULT_LABELS: Record<string, string> = {
-  purchase: "Compras",
-  "offsite_conversion.fb_pixel_purchase": "Compras",
-  lead: "Leads",
-  "offsite_conversion.fb_pixel_lead": "Leads",
-  "onsite_conversion.messaging_conversation_started_7d": "Conversas",
-  landing_page_view: "Visitas à página",
+const GENDER_LABEL: Record<string, string> = {
+  male: "Homens",
+  female: "Mulheres",
+  unknown: "Não informado",
+};
+const PLATFORM_LABEL: Record<string, string> = {
+  facebook: "Facebook",
+  instagram: "Instagram",
+  audience_network: "Audience Network",
+  messenger: "Messenger",
 };
 
-// Gradiente único por cliente (mesma lógica do ERP LinoADS)
-const GRADIENTS = [
-  "from-violet-500 to-fuchsia-500",
-  "from-sky-500 to-blue-600",
-  "from-emerald-500 to-teal-600",
-  "from-amber-500 to-orange-600",
-  "from-rose-500 to-pink-600",
-  "from-indigo-500 to-violet-600",
-];
-function clientGradient(name: string) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
-  return GRADIENTS[Math.abs(h) % GRADIENTS.length];
+// ===== Formatadores =====
+const fInt = (n: number) => Math.round(n).toLocaleString("pt-BR");
+const fMoney = (n: number) =>
+  n.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: n >= 100 ? 0 : 2 });
+const fMoney2 = (n: number) =>
+  n.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fPct = (n: number) =>
+  n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
+const fComp = (n: number) => {
+  if (n >= 1e6) return (n / 1e6).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "M";
+  if (n >= 1000) return (n / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) + " mil";
+  return fInt(n);
+};
+const pad = (n: number) => ("0" + n).slice(-2);
+const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const MON_SHORT = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
+const MON_LONG = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
+const WEEKDAYS = ["D", "S", "T", "Q", "Q", "S", "S"];
+
+function Delta({ cur, prev, invert = false, suffix = "vs período anterior" }: { cur: number; prev: number | null; invert?: boolean; suffix?: string }) {
+  if (prev === null || prev === 0 || !isFinite(prev)) {
+    return <span style={{ font: `600 11px ${BODY}`, color: MUTED }}>sem base de comparação</span>;
+  }
+  const pct = ((cur - prev) / Math.abs(prev)) * 100;
+  const good = invert ? pct < 0 : pct > 0;
+  const arrow = pct >= 0 ? "▲" : "▼";
+  return (
+    <span style={{ font: `600 11px ${BODY}`, color: MUTED }}>
+      <span style={{ color: good ? GREEN : "#E8336E", font: `700 12px ${DISPLAY}` }}>
+        {arrow} {Math.abs(pct).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%
+      </span>{" "}
+      {invert && good ? "mais barato" : suffix}
+    </span>
+  );
 }
 
-const brl = (v: number) =>
-  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-const num = (v: number) => v.toLocaleString("pt-BR");
+function KpiIcon({ grad, children }: { grad: string; children: React.ReactNode }) {
+  return (
+    <span
+      style={{
+        width: 42,
+        height: 42,
+        borderRadius: 11,
+        background: grad,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        flexShrink: 0,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
 
 export default function DashboardView({
   userName,
@@ -65,21 +116,42 @@ export default function DashboardView({
   isAdmin: boolean;
   clients: Client[];
 }) {
-  const [clientId, setClientId] = useState(clients[0].id);
-  const [period, setPeriod] = useState("last_7d");
+  const today = useMemo(() => new Date(), []);
+  const d7 = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 6);
+    return d;
+  }, []);
+
+  const [clientIdx, setClientIdx] = useState(0);
+  const [open, setOpen] = useState<null | "client" | "obj" | "date">(null);
+  const [objetivo, setObjetivo] = useState("auto");
+  const [preset, setPreset] = useState("7d");
+  const [rangeStart, setRangeStart] = useState(iso(d7));
+  const [rangeEnd, setRangeEnd] = useState(iso(today));
+  const [calY, setCalY] = useState(today.getFullYear());
+  const [calM, setCalM] = useState(today.getMonth());
+  const [pick, setPick] = useState<"start" | "end">("start");
+  const [level, setLevel] = useState<"campaign" | "adset" | "ad">("campaign");
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const activeClient = clients.find((c) => c.id === clientId) ?? clients[0];
+  const client = clients[clientIdx];
+  const clientColor = CLIENT_COLORS[clientIdx % CLIENT_COLORS.length];
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        `/api/insights?client_id=${clientId}&period=${period}`
-      );
+      const q = new URLSearchParams({
+        client_id: client.id,
+        since: rangeStart,
+        until: rangeEnd,
+        objetivo,
+        level,
+      });
+      const res = await fetch(`/api/insights?${q}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
       setData(json);
@@ -88,308 +160,557 @@ export default function DashboardView({
     } finally {
       setLoading(false);
     }
-  }, [clientId, period]);
+  }, [client.id, rangeStart, rangeEnd, objetivo, level]);
 
   useEffect(() => {
     load();
   }, [load]);
 
+  // ===== calendário =====
+  function setPresetRange(k: string) {
+    const t = new Date();
+    let s = new Date(t);
+    let e = new Date(t);
+    if (k === "7d") s.setDate(t.getDate() - 6);
+    else if (k === "14d") s.setDate(t.getDate() - 13);
+    else if (k === "30d") s.setDate(t.getDate() - 29);
+    else if (k === "mes") s = new Date(t.getFullYear(), t.getMonth(), 1);
+    else if (k === "mespassado") {
+      s = new Date(t.getFullYear(), t.getMonth() - 1, 1);
+      e = new Date(t.getFullYear(), t.getMonth(), 0);
+    }
+    setPreset(k);
+    setRangeStart(iso(s));
+    setRangeEnd(iso(e));
+    setCalY(s.getFullYear());
+    setCalM(s.getMonth());
+    setOpen(null);
+  }
+
+  function pickDay(dIso: string) {
+    if (pick === "start") {
+      setRangeStart(dIso);
+      setRangeEnd(dIso);
+      setPick("end");
+      setPreset("custom");
+    } else {
+      let a = rangeStart;
+      let b = dIso;
+      if (b < a) [a, b] = [b, a];
+      setRangeStart(a);
+      setRangeEnd(b);
+      setPick("start");
+      setPreset("custom");
+    }
+  }
+
+  const calCells = useMemo(() => {
+    const lead = new Date(calY, calM, 1).getDay();
+    const dim = new Date(calY, calM + 1, 0).getDate();
+    const cells: { label: string; iso?: string; state: "empty" | "in" | "edge" | "normal" }[] = [];
+    for (let i = 0; i < lead; i++) cells.push({ label: "", state: "empty" });
+    for (let d = 1; d <= dim; d++) {
+      const s = `${calY}-${pad(calM + 1)}-${pad(d)}`;
+      const state = s === rangeStart || s === rangeEnd ? "edge" : s > rangeStart && s < rangeEnd ? "in" : "normal";
+      cells.push({ label: String(d), iso: s, state });
+    }
+    return cells;
+  }, [calY, calM, rangeStart, rangeEnd]);
+
+  const days = Math.round((new Date(rangeEnd + "T12:00").getTime() - new Date(rangeStart + "T12:00").getTime()) / 86400000) + 1;
+  const ds = new Date(rangeStart + "T12:00");
+  const de = new Date(rangeEnd + "T12:00");
+  const dateLabel =
+    preset === "mes" ? MON_LONG[ds.getMonth()] :
+    preset === "mespassado" ? MON_LONG[ds.getMonth()] :
+    `${ds.getDate()} ${MON_SHORT[ds.getMonth()]} – ${de.getDate()} ${MON_SHORT[de.getMonth()]}`;
+
+  // ===== dados derivados =====
   const acc = data?.account;
-  const resultLabel = acc?.resultType
-    ? RESULT_LABELS[acc.resultType] ?? "Resultados"
-    : "Resultados";
+  const prv = data?.previous;
+  const spend = Number(acc?.spend ?? 0);
+  const meta = data?.meta ?? { resultKey: "Resultados", custoKey: "Custo por resultado", custoShort: "Custo/result." };
+  const funnel: { stage: string; value: number }[] = data?.funnel ?? [];
+  const maxFunnel = Math.max(...funnel.map((f) => f.value), 1);
+  const funnelRate =
+    funnel.length >= 2 && funnel[0].value > 0
+      ? ((funnel[funnel.length - 1].value / funnel[0].value) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%"
+      : "—";
 
-  const secondary = acc
-    ? [
-        { label: "Impressões", value: num(Number(acc.impressions)) },
-        { label: "Cliques", value: num(Number(acc.clicks)) },
-        { label: "CTR", value: `${Number(acc.ctr).toFixed(2)}%` },
-        { label: "CPC", value: brl(Number(acc.cpc)) },
-        { label: "CPM", value: brl(Number(acc.cpm)) },
-      ]
-    : [];
+  const genderTotal = (data?.gender ?? []).reduce((a: number, g: any) => a + g.spend, 0);
+  const CIRC = 2 * Math.PI * 54;
+  let segOffset = 0;
+  const genderSegs = (data?.gender ?? [])
+    .filter((g: any) => g.spend > 0)
+    .map((g: any, i: number) => {
+      const pct = genderTotal > 0 ? g.spend / genderTotal : 0;
+      const seg = {
+        label: GENDER_LABEL[g.gender] ?? g.gender,
+        color: SEG_COLORS[i % SEG_COLORS.length],
+        pctStr: fPct(pct * 100),
+        dash: `${pct * CIRC} ${CIRC}`,
+        offset: -segOffset,
+      };
+      segOffset += pct * CIRC;
+      return seg;
+    });
 
-  const chartData =
-    data?.daily?.map((d: any) => ({
-      date: new Date(d.date_start + "T12:00:00").toLocaleDateString("pt-BR", {
-        day: "2-digit",
-        month: "2-digit",
-      }),
-      investimento: Number(d.spend),
-    })) ?? [];
+  const platTotal = (data?.platform ?? []).reduce((a: number, p: any) => a + p.spend, 0);
+  const platBars = (data?.platform ?? [])
+    .filter((p: any) => p.spend > 0)
+    .sort((a: any, b: any) => b.spend - a.spend)
+    .map((p: any, i: number) => ({
+      label: PLATFORM_LABEL[p.platform] ?? p.platform,
+      valStr: fMoney(p.spend),
+      pctStr: platTotal > 0 ? fPct((p.spend / platTotal) * 100) : "",
+      width: platTotal > 0 ? (p.spend / platTotal) * 100 : 0,
+      color: FUNNEL_COLORS[i % FUNNEL_COLORS.length],
+    }));
 
-  const totalSpend = Number(acc?.spend ?? 0);
+  const rows = (data?.rows ?? [])
+    .slice()
+    .sort((a: any, b: any) => Number(b.spend) - Number(a.spend));
+  const rowName = (r: any) =>
+    data?.level === "ad" ? r.ad_name : data?.level === "adset" ? r.adset_name : r.campaign_name;
+  const destaques = rows
+    .slice()
+    .sort((a: any, b: any) => b.results - a.results)
+    .slice(0, 3);
+
+  const dd = { position: "absolute" as const, top: "calc(100% + 8px)", zIndex: 50, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 14, padding: 7, boxShadow: "0 20px 44px -18px rgba(20,15,50,.4)" };
 
   return (
-    <main className="min-h-screen">
-      {/* ===== Topbar ===== */}
-      <header className="sticky top-0 z-10 border-b border-[var(--border)] bg-[rgba(10,10,11,0.85)] backdrop-blur px-5 py-3 flex flex-wrap items-center gap-4">
-        <div className="flex items-center gap-3 mr-auto">
-          <span className="font-[family-name:var(--font-display)] font-bold tracking-tight text-lg">
-            Lino<span className="text-[var(--accent)]">ADS</span>
-          </span>
-          <span className="hidden sm:block text-neutral-600">/</span>
-          <span className="hidden sm:block text-sm text-neutral-400">
-            Portal do cliente
-          </span>
+    <main style={{ minHeight: "100vh", background: "#F5F6FA", padding: "22px 26px", fontFamily: BODY }} onClick={() => open && setOpen(null)}>
+      <div style={{ maxWidth: 1180, margin: "0 auto" }}>
+        {/* ===== TOP BAR ===== */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", marginBottom: 18, position: "relative", zIndex: 45 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 11, marginRight: 6 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="LinoADS" style={{ width: 40, height: 40 }} />
+            <div style={{ display: "flex", flexDirection: "column", lineHeight: 1 }}>
+              <span style={{ font: `700 19px ${DISPLAY}`, color: NAVY, letterSpacing: "-.01em" }}>LinoADS</span>
+              <span style={{ font: `600 8px ${BODY}`, color: MUTED2, letterSpacing: ".16em" }}>ASSESSORIA DE MARKETING</span>
+            </div>
+          </div>
+
+          {/* Client selector */}
+          <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setOpen(open === "client" ? null : "client")}
+              style={{ display: "flex", alignItems: "center", gap: 11, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 13, padding: "9px 14px", cursor: isAdmin ? "pointer" : "default", boxShadow: "0 1px 2px rgba(20,15,50,.04)" }}
+            >
+              <span style={{ width: 30, height: 30, borderRadius: 8, background: clientColor, display: "flex", alignItems: "center", justifyContent: "center", font: `700 13px ${DISPLAY}`, color: "#fff" }}>
+                {client.name.charAt(0)}
+              </span>
+              <span style={{ textAlign: "left" }}>
+                <span style={{ display: "block", font: `700 14px ${DISPLAY}`, color: NAVY }}>{client.name}</span>
+                <span style={{ display: "block", font: `600 10px ${BODY}`, color: MUTED }}>{meta.resultKey}</span>
+              </span>
+              {isAdmin && (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="2" style={{ marginLeft: 4 }}>
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              )}
+            </button>
+            {open === "client" && isAdmin && (
+              <div style={{ ...dd, left: 0, width: 290 }}>
+                <div style={{ font: `600 10px ${BODY}`, letterSpacing: ".05em", textTransform: "uppercase", color: MUTED2, padding: "6px 10px 4px" }}>Escolher cliente</div>
+                {clients.map((c, i) => (
+                  <button
+                    key={c.id}
+                    onClick={() => { setClientIdx(i); setOpen(null); }}
+                    style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", border: "none", cursor: "pointer", background: i === clientIdx ? "#F5F6FA" : "transparent", borderRadius: 10, padding: "9px 10px", textAlign: "left" }}
+                  >
+                    <span style={{ width: 28, height: 28, borderRadius: 8, background: CLIENT_COLORS[i % CLIENT_COLORS.length], display: "flex", alignItems: "center", justifyContent: "center", font: `700 12px ${DISPLAY}`, color: "#fff", flexShrink: 0 }}>
+                      {c.name.charAt(0)}
+                    </span>
+                    <span style={{ flex: 1 }}>
+                      <span style={{ display: "block", font: `600 13px ${BODY}`, color: NAVY }}>{c.name}</span>
+                    </span>
+                    <span style={{ font: `600 10px ${BODY}`, color: CLIENT_COLORS[i % CLIENT_COLORS.length], background: CLIENT_TINTS[i % CLIENT_TINTS.length], padding: "3px 9px", borderRadius: 20 }}>
+                      Meta
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Objetivo */}
+          <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setOpen(open === "obj" ? null : "obj")}
+              style={{ display: "flex", alignItems: "center", gap: 9, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 13, padding: "12px 14px", cursor: "pointer", boxShadow: "0 1px 2px rgba(20,15,50,.04)" }}
+            >
+              <span style={{ font: `600 11px ${BODY}`, color: MUTED }}>Tipo:</span>
+              <span style={{ font: `700 13px ${DISPLAY}`, color: NAVY }}>
+                {OBJ_OPTIONS.find((o) => o.key === objetivo)?.label ?? "Automático"}
+              </span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="2"><path d="M6 9l6 6 6-6" /></svg>
+            </button>
+            {open === "obj" && (
+              <div style={{ ...dd, left: 0, width: 230 }}>
+                <div style={{ font: `600 10px ${BODY}`, letterSpacing: ".05em", textTransform: "uppercase", color: MUTED2, padding: "6px 10px 4px" }}>Objetivo da campanha</div>
+                {OBJ_OPTIONS.map((o) => (
+                  <button
+                    key={o.key}
+                    onClick={() => { setObjetivo(o.key); setOpen(null); }}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%", border: "none", cursor: "pointer", background: o.key === objetivo ? "#F5F6FA" : "transparent", borderRadius: 10, padding: 10, textAlign: "left" }}
+                  >
+                    <span style={{ font: `600 13px ${BODY}`, color: NAVY }}>{o.label}</span>
+                    {o.key === objetivo && (
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#F5813C" strokeWidth="2.5"><path d="M20 6L9 17l-5-5" /></svg>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Calendário */}
+          <div style={{ position: "relative", marginLeft: "auto" }} onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setOpen(open === "date" ? null : "date")}
+              style={{ display: "flex", alignItems: "center", gap: 10, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 13, padding: "12px 14px", cursor: "pointer", boxShadow: "0 1px 2px rgba(20,15,50,.04)" }}
+            >
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#F5813C" strokeWidth="2"><rect x="3" y="4" width="18" height="17" rx="2.5" /><path d="M3 9h18M8 2v4M16 2v4" /></svg>
+              <span style={{ font: `700 13px ${DISPLAY}`, color: NAVY }}>{dateLabel}</span>
+              <span style={{ font: `600 11px ${BODY}`, color: MUTED }}>{days} dias</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="2"><path d="M6 9l6 6 6-6" /></svg>
+            </button>
+            {open === "date" && (
+              <div style={{ ...dd, right: 0, width: 520, borderRadius: 16, padding: 14, display: "flex", gap: 14 }}>
+                <div style={{ width: 168, display: "flex", flexDirection: "column", gap: 4, borderRight: "1px solid #F0F1F6", paddingRight: 12 }}>
+                  <div style={{ font: `600 10px ${BODY}`, letterSpacing: ".05em", textTransform: "uppercase", color: MUTED2, padding: "4px 8px 6px" }}>Atalhos</div>
+                  {[
+                    { k: "7d", label: "Últimos 7 dias" },
+                    { k: "14d", label: "Últimos 14 dias" },
+                    { k: "30d", label: "Últimos 30 dias" },
+                    { k: "mes", label: "Este mês" },
+                    { k: "mespassado", label: "Mês passado" },
+                  ].map((p) => (
+                    <button
+                      key={p.k}
+                      onClick={() => setPresetRange(p.k)}
+                      style={{ textAlign: "left", border: "none", cursor: "pointer", background: preset === p.k ? "#1A1442" : "transparent", color: preset === p.k ? "#fff" : INK2, borderRadius: 9, padding: "10px 12px", font: `600 12px ${BODY}` }}
+                    >
+                      {p.label}
+                    </button>
+                  ))}
+                  <div style={{ marginTop: "auto", padding: 8, font: `500 11px/1.4 ${BODY}`, color: MUTED }}>
+                    Clique em dois dias no calendário para um intervalo personalizado.
+                  </div>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                    <button onClick={() => { let m = calM - 1, y = calY; if (m < 0) { m = 11; y--; } setCalM(m); setCalY(y); }} style={{ border: "none", background: "#F5F6FA", borderRadius: 8, width: 30, height: 30, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={INK2} strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
+                    </button>
+                    <span style={{ font: `700 14px ${DISPLAY}`, color: NAVY }}>{MON_LONG[calM]} {calY}</span>
+                    <button onClick={() => { let m = calM + 1, y = calY; if (m > 11) { m = 0; y++; } setCalM(m); setCalY(y); }} style={{ border: "none", background: "#F5F6FA", borderRadius: 8, width: 30, height: 30, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={INK2} strokeWidth="2"><path d="M9 18l6-6-6-6" /></svg>
+                    </button>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2, marginBottom: 4 }}>
+                    {WEEKDAYS.map((w, i) => (
+                      <span key={i} style={{ textAlign: "center", font: `600 10px ${BODY}`, color: "#B4B8C6", padding: "4px 0" }}>{w}</span>
+                    ))}
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 2 }}>
+                    {calCells.map((c, i) => (
+                      <button
+                        key={i}
+                        onClick={() => c.iso && pickDay(c.iso)}
+                        style={{
+                          border: "none",
+                          cursor: c.iso ? "pointer" : "default",
+                          background: c.state === "edge" ? NAVY : c.state === "in" ? "#EDEAF7" : "transparent",
+                          color: c.state === "edge" ? "#fff" : c.state === "in" ? NAVY : INK2,
+                          borderRadius: 9,
+                          height: 34,
+                          font: `600 12px ${BODY}`,
+                          padding: 0,
+                        }}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button onClick={() => window.print()} style={{ border: "none", cursor: "pointer", background: NAVY, color: "#fff", borderRadius: 13, padding: "12px 18px", font: `600 13px ${BODY}`, display: "flex", alignItems: "center", gap: 8 }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16" /></svg>
+            Exportar PDF
+          </button>
         </div>
 
-        {isAdmin && (
-          <select
-            value={clientId}
-            onChange={(e) => setClientId(e.target.value)}
-            className="bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm outline-none focus:border-[var(--accent)]"
-          >
-            {clients.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        )}
-
-        <span className="text-xs text-neutral-500">{userName}</span>
-      </header>
-
-      <div className="px-5 py-8 max-w-6xl mx-auto">
-        {/* ===== Identidade do cliente + período ===== */}
-        <section className="flex flex-wrap items-center gap-4 mb-8">
-          <div
-            className={`h-12 w-12 rounded-xl bg-gradient-to-br ${clientGradient(
-              activeClient.name
-            )} grid place-items-center font-[family-name:var(--font-display)] font-bold text-lg shadow-lg`}
-          >
-            {activeClient.name.charAt(0)}
+        {/* ===== Selo Meta Ads (tabs de plataforma removidas: Google entra depois) ===== */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+          <div style={{ display: "inline-flex", background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 14, padding: 4, boxShadow: "0 1px 2px rgba(20,15,50,.04)" }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px", borderRadius: 11, font: `700 13px ${DISPLAY}`, background: NAVY, color: "#fff" }}>
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: error ? "#E8336E" : "#4FBF8B" }} />
+              Meta Ads
+            </span>
           </div>
-          <div className="mr-auto">
-            <h1 className="font-[family-name:var(--font-display)] font-semibold text-xl leading-tight">
-              {activeClient.name}
-            </h1>
-            <p className="text-xs text-neutral-500 flex items-center gap-1.5">
-              <span
-                className={`inline-block h-1.5 w-1.5 rounded-full glow-dot ${
-                  error ? "text-[var(--negative)] bg-[var(--negative)]" : "text-[var(--positive)] bg-[var(--positive)]"
-                }`}
-              />
-              {error ? "Falha na sincronização" : "Sincronizado com a Meta"}
-            </p>
+          <div style={{ font: `500 12px ${BODY}`, color: MUTED }}>
+            {client.name} · Meta Ads · {dateLabel} · {userName}
           </div>
-
-          <div className="flex gap-1 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-1">
-            {PERIODS.map((p) => (
-              <button
-                key={p.value}
-                onClick={() => setPeriod(p.value)}
-                className={`px-3 py-1.5 text-xs rounded-md transition ${
-                  period === p.value
-                    ? "bg-[var(--accent)] text-neutral-950 font-semibold"
-                    : "text-neutral-400 hover:text-white"
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          <button
-            onClick={load}
-            disabled={loading}
-            className="text-xs border border-[var(--border)] rounded-lg px-3 py-2 text-neutral-300 hover:border-[var(--accent)] hover:text-[var(--accent)] disabled:opacity-50 transition"
-          >
-            {loading ? "Atualizando..." : "Atualizar agora"}
-          </button>
-        </section>
+        </div>
 
         {error && (
-          <div className="mb-8 rounded-xl border border-red-900/60 bg-red-950/40 px-4 py-3 text-sm text-red-300">
+          <div style={{ ...CARD, borderColor: "#F5C4D2", background: "#FDF2F6", padding: "14px 18px", marginBottom: 16, font: `600 13px ${BODY}`, color: "#C21E56" }}>
             {error}
           </div>
         )}
 
-        {/* ===== Hero: a pergunta do cliente ===== */}
-        <section className="grid md:grid-cols-3 gap-3 mb-3">
+        {/* ===== KPI GRID ===== */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 16 }}>
           {[
-            { label: "Investimento", value: acc ? brl(totalSpend) : null, hero: false },
-            { label: resultLabel, value: acc ? num(acc.results) : null, hero: true },
             {
-              label: `Custo por ${resultLabel.toLowerCase().replace(/s$/, "")}`,
-              value: acc ? (acc.costPerResult ? brl(acc.costPerResult) : "—") : null,
-              hero: false,
+              key: "invest",
+              icon: <KpiIcon grad="linear-gradient(135deg,#EF6D2E,#F9C22E)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><rect x="2" y="6" width="20" height="13" rx="2.5" /><path d="M16 12h.01M2 10h20" /></svg></KpiIcon>,
+              label: "Investimento · Valor gasto",
+              value: acc ? fMoney2(spend) : null,
+              delta: acc ? <Delta cur={spend} prev={prv ? Number(prv.spend) : null} /> : null,
             },
-          ].map((kpi, i) => (
-            <div
-              key={i}
-              className={`card-hover rounded-2xl border p-6 ${
-                kpi.hero
-                  ? "border-[var(--accent)]/40 bg-gradient-to-b from-[#a78bfa14] to-transparent"
-                  : "border-[var(--border)] bg-[var(--surface)]"
-              }`}
-            >
-              <p className="text-xs uppercase tracking-widest text-neutral-500 mb-2">
-                {kpi.label}
-              </p>
-              {kpi.value !== null ? (
-                <p
-                  className={`font-[family-name:var(--font-display)] font-bold tabular-nums ${
-                    kpi.hero ? "text-4xl text-[var(--accent)]" : "text-3xl"
-                  }`}
-                >
-                  {kpi.value}
-                </p>
-              ) : (
-                <div className="h-10 animate-pulse bg-[var(--surface-2)] rounded" />
-              )}
+            {
+              key: "result",
+              icon: <KpiIcon grad="linear-gradient(135deg,#E8336E,#F26D33)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M12 2s5 3 5 9c0 2-1 4-1 4l-4 4-4-4s-1-2-1-4c0-6 5-9 5-9z" /><circle cx="12" cy="10" r="1.5" /></svg></KpiIcon>,
+              label: `Resultado · ${meta.resultKey}`,
+              value: acc ? fInt(acc.results) : null,
+              delta: acc ? <Delta cur={acc.results} prev={prv ? prv.results : null} /> : null,
+            },
+            {
+              key: "custo",
+              icon: <KpiIcon grad="linear-gradient(135deg,#F26D33,#F7A233)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M20 12l-8 8-9-9V3h8z" /><circle cx="7.5" cy="7.5" r="1.5" /></svg></KpiIcon>,
+              label: meta.custoKey,
+              value: acc ? (acc.costPerResult ? fMoney2(acc.costPerResult) : "—") : null,
+              delta: acc ? <Delta cur={acc.costPerResult ?? 0} prev={prv?.costPerResult ?? null} invert /> : null,
+            },
+            {
+              key: "retorno",
+              icon: <KpiIcon grad="linear-gradient(135deg,#12A66A,#4FBF8B)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v10M9.5 9.5A2.5 2.5 0 0 1 12 8c1.5 0 2.5 1 2.5 2s-1 2-2.5 2-2.5 1-2.5 2 1 2 2.5 2a2.5 2.5 0 0 0 2.5-1.5" /></svg></KpiIcon>,
+              label: "Retorno (ROAS)",
+              value: acc ? (acc.roas ? acc.roas.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "x" : "—") : null,
+              delta: acc ? <span style={{ font: `600 11px ${BODY}`, color: MUTED }}>{acc.roas ? "receita atribuída pelo pixel" : "disponível com evento de compra"}</span> : null,
+            },
+            {
+              key: "cpm",
+              icon: <KpiIcon grad="linear-gradient(135deg,#F5813C,#F9C22E)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M4 20V12M9 20V6M14 20v-9M19 20V9" /></svg></KpiIcon>,
+              label: "CPM · custo por mil",
+              value: acc ? fMoney2(Number(acc.cpm)) : null,
+              delta: acc ? <Delta cur={Number(acc.cpm)} prev={prv ? Number(prv.cpm) : null} invert /> : null,
+            },
+            {
+              key: "ctr",
+              icon: <KpiIcon grad="linear-gradient(135deg,#E8336E,#F5813C)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M10 9l5 3-5 3z" fill="#fff" stroke="none" /></svg></KpiIcon>,
+              label: "CTR · taxa de clique",
+              value: acc ? fPct(Number(acc.ctr)) : null,
+              delta: acc ? <Delta cur={Number(acc.ctr)} prev={prv ? Number(prv.ctr) : null} /> : null,
+            },
+          ].map((k) => (
+            <div key={k.key} style={{ ...CARD, borderRadius: 16, padding: 18 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                {k.icon}
+                <div>
+                  <div style={{ font: `600 11px ${BODY}`, color: MUTED }}>{k.label}</div>
+                  {k.value !== null ? (
+                    <div style={{ font: `700 26px/1.05 ${DISPLAY}`, color: NAVY, marginTop: 3 }}>{k.value}</div>
+                  ) : (
+                    <div style={{ height: 27, width: 110, marginTop: 3, background: "#F0F1F6", borderRadius: 6 }} className="animate-pulse" />
+                  )}
+                </div>
+              </div>
+              <div style={{ marginTop: 12 }}>{k.delta}</div>
             </div>
           ))}
-        </section>
+        </div>
 
-        {/* ===== KPIs secundários ===== */}
-        <section className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-10">
-          {(loading && !data ? Array(5).fill(null) : secondary).map(
-            (kpi, i) => (
-              <div
-                key={i}
-                className="card-hover rounded-xl border border-[var(--border)] bg-[var(--surface)] px-4 py-3"
-              >
-                {kpi ? (
-                  <>
-                    <p className="text-[11px] text-neutral-500">{kpi.label}</p>
-                    <p className="font-[family-name:var(--font-display)] font-semibold tabular-nums">
-                      {kpi.value}
-                    </p>
-                  </>
-                ) : (
-                  <div className="h-9 animate-pulse bg-[var(--surface-2)] rounded" />
-                )}
+        {/* ===== FUNIL + COLUNA DIREITA ===== */}
+        <div style={{ display: "grid", gridTemplateColumns: "1.55fr 1fr", gap: 16, marginBottom: 16, alignItems: "start" }}>
+          <div style={{ ...CARD, padding: "22px 24px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+                <span style={{ width: 36, height: 36, borderRadius: 10, background: "linear-gradient(135deg,#EF6D2E,#F9C22E)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><path d="M3 4h18l-7 8v6l-4 2v-8z" /></svg>
+                </span>
+                <div>
+                  <div style={{ font: `700 16px ${DISPLAY}`, color: NAVY }}>Funil de conversão</div>
+                  <div style={{ font: `500 11px ${BODY}`, color: MUTED }}>eventos reais do pixel · Meta Ads</div>
+                </div>
               </div>
-            )
-          )}
-        </section>
-
-        {/* ===== Gráfico diário ===== */}
-        {chartData.length > 1 && (
-          <section className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] p-5 mb-10">
-            <p className="text-sm text-neutral-400 mb-4">
-              Investimento por dia
-            </p>
-            <ResponsiveContainer width="100%" height={240}>
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="spend" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#a78bfa" stopOpacity={0.35} />
-                    <stop offset="100%" stopColor="#a78bfa" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid stroke="#1f1f23" vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  stroke="#52525b"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <YAxis
-                  stroke="#52525b"
-                  fontSize={11}
-                  tickLine={false}
-                  axisLine={false}
-                  tickFormatter={(v) => `R$${v}`}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: "#17171a",
-                    border: "1px solid #2e2e35",
-                    borderRadius: 10,
-                    fontSize: 13,
-                  }}
-                  formatter={(v: number) => [brl(v), "Investimento"]}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="investimento"
-                  stroke="#a78bfa"
-                  strokeWidth={2}
-                  fill="url(#spend)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </section>
-        )}
-
-        {/* ===== Campanhas ===== */}
-        <section>
-          <h2 className="font-[family-name:var(--font-display)] font-semibold mb-3">
-            Campanhas
-          </h2>
-          <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface)] overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-[var(--border)] text-left text-[11px] uppercase tracking-wider text-neutral-500">
-                    <th className="px-4 py-3 font-medium">Campanha</th>
-                    <th className="px-4 py-3 font-medium text-right">
-                      Investimento
-                    </th>
-                    <th className="px-4 py-3 font-medium text-right">
-                      Resultados
-                    </th>
-                    <th className="px-4 py-3 font-medium text-right">
-                      Custo/result.
-                    </th>
-                    <th className="px-4 py-3 font-medium text-right">CTR</th>
-                    <th className="px-4 py-3 font-medium text-right w-32">
-                      Share
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(data?.campaigns ?? []).map((c: any) => {
-                    const share =
-                      totalSpend > 0
-                        ? (Number(c.spend) / totalSpend) * 100
-                        : 0;
-                    return (
-                      <tr
-                        key={c.campaign_id}
-                        className="border-b border-[var(--border)]/60 hover:bg-[var(--surface-2)] transition-colors"
-                      >
-                        <td className="px-4 py-3 max-w-[280px] truncate">
-                          {c.campaign_name}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {brl(Number(c.spend))}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums font-semibold text-[var(--accent)]">
-                          {num(c.results)}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {c.costPerResult ? brl(c.costPerResult) : "—"}
-                        </td>
-                        <td className="px-4 py-3 text-right tabular-nums">
-                          {Number(c.ctr).toFixed(2)}%
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="h-1.5 rounded-full bg-[var(--surface-2)] overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-gradient-to-r from-violet-500 to-fuchsia-500"
-                              style={{ width: `${Math.min(share, 100)}%` }}
-                            />
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              <span style={{ font: `700 11px ${DISPLAY}`, color: "#EF6D2E", background: "#FDEEE1", padding: "6px 13px", borderRadius: 20 }}>
+                Conversão {funnelRate}
+              </span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+              {funnel.map((f, i) => {
+                const width = Math.max((f.value / maxFunnel) * 100, 26);
+                const costPer = f.value > 0 ? spend / f.value : null;
+                return (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "74px 1fr 148px", alignItems: "center", gap: 12 }}>
+                    <div style={{ textAlign: "right" }}>
+                      {i > 0 && funnel[i - 1].value > 0 && (
+                        <span style={{ font: `700 11px ${DISPLAY}`, color: "#6A6A85", background: "#F4F5F9", padding: "4px 9px", borderRadius: 20 }}>
+                          {fPct((f.value / funnel[i - 1].value) * 100)}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ width: `${width}%`, minWidth: 150, margin: "0 auto", background: FUNNEL_COLORS[i % FUNNEL_COLORS.length], borderRadius: 11, padding: "13px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", transition: "width .55s cubic-bezier(.4,0,.2,1)" }}>
+                      <span style={{ font: `600 12px ${BODY}`, color: "rgba(255,255,255,.94)" }}>{f.stage}</span>
+                      <span style={{ font: `700 18px ${DISPLAY}`, color: "#fff" }}>{fComp(f.value)}</span>
+                    </div>
+                    <div style={{ textAlign: "left" }}>
+                      <div style={{ font: `500 10px ${BODY}`, color: MUTED2 }}>custo por etapa</div>
+                      <div style={{ font: `700 13px ${DISPLAY}`, color: INK2 }}>{costPer !== null ? fMoney2(costPer) : "—"}</div>
+                    </div>
+                  </div>
+                );
+              })}
+              {!funnel.length && !loading && (
+                <div style={{ font: `500 13px ${BODY}`, color: MUTED, padding: 20, textAlign: "center" }}>Sem eventos no período selecionado.</div>
+              )}
             </div>
           </div>
-        </section>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* Donut gênero */}
+            <div style={{ ...CARD, padding: "20px 22px" }}>
+              <div style={{ font: `700 15px ${DISPLAY}`, color: NAVY, marginBottom: 4 }}>Investimento por gênero</div>
+              <div style={{ font: `500 11px ${BODY}`, color: MUTED }}>distribuição do valor gasto</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 18, marginTop: 10 }}>
+                <div style={{ position: "relative", width: 132, height: 132, flexShrink: 0 }}>
+                  <svg viewBox="0 0 140 140" width="132" height="132">
+                    <circle cx="70" cy="70" r="54" fill="none" stroke="#F1F2F7" strokeWidth="16" />
+                    {genderSegs.map((s: any, i: number) => (
+                      <circle key={i} cx="70" cy="70" r="54" fill="none" stroke={s.color} strokeWidth="16" strokeDasharray={s.dash} strokeDashoffset={s.offset} transform="rotate(-90 70 70)" />
+                    ))}
+                  </svg>
+                  <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/logo.png" alt="" style={{ width: 42, height: 42 }} />
+                  </div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1 }}>
+                  {genderSegs.map((s: any, i: number) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 7, font: `600 12px ${BODY}`, color: INK2 }}>
+                        <span style={{ width: 9, height: 9, borderRadius: 3, background: s.color }} />
+                        {s.label}
+                      </span>
+                      <span style={{ font: `700 13px ${DISPLAY}`, color: NAVY }}>{s.pctStr}</span>
+                    </div>
+                  ))}
+                  {!genderSegs.length && <span style={{ font: `500 12px ${BODY}`, color: MUTED }}>Sem dados no período.</span>}
+                </div>
+              </div>
+            </div>
+            {/* Barras por plataforma */}
+            <div style={{ ...CARD, padding: "20px 22px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 14 }}>
+                <span style={{ width: 30, height: 30, borderRadius: 8, background: "linear-gradient(135deg,#E8336E,#F5813C)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M10 9l5 3-5 3z" fill="#fff" stroke="none" /></svg>
+                </span>
+                <span style={{ font: `700 15px ${DISPLAY}`, color: NAVY }}>Onde seu anúncio aparece</span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {platBars.map((b: any, i: number) => (
+                  <div key={i}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 5 }}>
+                      <span style={{ font: `600 12px ${BODY}`, color: INK2 }}>{b.label}</span>
+                      <span style={{ font: `700 12px ${DISPLAY}`, color: NAVY }}>
+                        {b.valStr} <span style={{ color: MUTED2, font: `600 11px ${BODY}` }}>{b.pctStr}</span>
+                      </span>
+                    </div>
+                    <div style={{ height: 9, background: "#F4F5F9", borderRadius: 6, overflow: "hidden" }}>
+                      <div style={{ height: "100%", width: `${b.width}%`, background: b.color, borderRadius: 6, transition: "width .5s" }} />
+                    </div>
+                  </div>
+                ))}
+                {!platBars.length && <span style={{ font: `500 12px ${BODY}`, color: MUTED }}>Sem dados no período.</span>}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ===== TABELA + DESTAQUES ===== */}
+        <div style={{ display: "grid", gridTemplateColumns: "1.75fr 1fr", gap: 16, alignItems: "start" }}>
+          <div style={{ ...CARD, padding: "20px 22px 12px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ font: `700 15px ${DISPLAY}`, color: NAVY }}>Visão geral</div>
+              <div style={{ display: "inline-flex", background: "#F4F5F9", borderRadius: 10, padding: 3, gap: 2 }}>
+                {[
+                  { k: "campaign", label: "Campanhas" },
+                  { k: "adset", label: "Conjuntos" },
+                  { k: "ad", label: "Anúncios" },
+                ].map((l) => (
+                  <button
+                    key={l.k}
+                    onClick={() => setLevel(l.k as any)}
+                    style={{ border: "none", cursor: "pointer", padding: "7px 14px", borderRadius: 8, font: `600 12px ${BODY}`, background: level === l.k ? "#fff" : "transparent", color: level === l.k ? NAVY : MUTED, boxShadow: level === l.k ? "0 1px 2px rgba(20,15,50,.08)" : "none", transition: "all .2s" }}
+                  >
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "2.1fr 1fr 0.9fr 1fr 1.1fr 1.1fr", padding: "8px 12px", borderBottom: "1px solid #F0F1F6" }}>
+              {[
+                level === "ad" ? "Anúncio" : level === "adset" ? "Conjunto" : "Campanha",
+                meta.resultKey, "CTR", "Cliques", meta.custoShort, "Investido",
+              ].map((h, i) => (
+                <span key={i} style={{ font: `600 10px ${BODY}`, letterSpacing: ".04em", textTransform: "uppercase", color: MUTED2, textAlign: i === 0 ? "left" : "right" }}>{h}</span>
+              ))}
+            </div>
+            {rows.map((r: any, i: number) => (
+              <div key={i} style={{ display: "grid", gridTemplateColumns: "2.1fr 1fr 0.9fr 1fr 1.1fr 1.1fr", alignItems: "center", padding: "13px 12px", borderRadius: 10 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 3, background: FUNNEL_COLORS[i % FUNNEL_COLORS.length], flexShrink: 0 }} />
+                  <span style={{ font: `600 13px ${BODY}`, color: NAVY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{rowName(r)}</span>
+                </span>
+                <span style={{ font: `700 13px ${DISPLAY}`, color: NAVY, textAlign: "right" }}>{fInt(r.results)}</span>
+                <span style={{ font: `600 12px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{fPct(Number(r.ctr))}</span>
+                <span style={{ font: `600 12px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{fInt(Number(r.clicks))}</span>
+                <span style={{ font: `600 12px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{r.costPerResult ? fMoney2(r.costPerResult) : "—"}</span>
+                <span style={{ font: `700 13px ${DISPLAY}`, color: NAVY, textAlign: "right" }}>{fMoney2(Number(r.spend))}</span>
+              </div>
+            ))}
+            {!rows.length && !loading && (
+              <div style={{ font: `500 13px ${BODY}`, color: MUTED, padding: 20, textAlign: "center" }}>Sem veiculação no período.</div>
+            )}
+          </div>
+
+          <div style={{ ...CARD, padding: "20px 22px" }}>
+            <div style={{ font: `700 15px ${DISPLAY}`, color: NAVY, marginBottom: 3 }}>Destaques</div>
+            <div style={{ font: `500 11px ${BODY}`, color: MUTED, marginBottom: 14 }}>melhores desempenhos do período</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {destaques.map((d: any, i: number) => (
+                <div key={i} style={{ display: "flex", gap: 12, alignItems: "center", padding: 10, border: "1px solid #F0F1F6", borderRadius: 12 }}>
+                  <span style={{ width: 48, height: 48, borderRadius: 10, background: `linear-gradient(135deg,${FUNNEL_COLORS[i]},${FUNNEL_COLORS[i + 2] ?? "#F9C22E"})`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="9" cy="9" r="2" /><path d="M21 15l-5-5L5 21" /></svg>
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ font: `600 13px ${BODY}`, color: NAVY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{rowName(d)}</div>
+                    <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+                      <span style={{ font: `600 11px ${BODY}`, color: "#6A6A85" }}>{fInt(d.results)} {meta.resultKey.toLowerCase()}</span>
+                      <span style={{ font: `600 11px ${BODY}`, color: "#EF6D2E" }}>{d.costPerResult ? fMoney2(d.costPerResult) : "—"}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {!destaques.length && !loading && (
+                <span style={{ font: `500 12px ${BODY}`, color: MUTED }}>Sem dados no período.</span>
+              )}
+            </div>
+          </div>
+        </div>
 
         {data?.fetched_at && (
-          <p className="text-xs text-neutral-600 mt-5">
-            Dados da Meta atualizados em{" "}
-            {new Date(data.fetched_at).toLocaleString("pt-BR")}. A Meta pode
-            levar até algumas horas para consolidar resultados do dia.
+          <p style={{ font: `500 11px ${BODY}`, color: MUTED2, marginTop: 18 }}>
+            Dados da Meta atualizados em {new Date(data.fetched_at).toLocaleString("pt-BR")}. A Meta pode levar até algumas horas para consolidar os resultados do dia.
           </p>
         )}
       </div>
