@@ -124,7 +124,7 @@ export default function DashboardView({
   }, []);
 
   const [clientIdx, setClientIdx] = useState(0);
-  const [open, setOpen] = useState<null | "client" | "obj" | "date">(null);
+  const [open, setOpen] = useState<null | "client" | "obj" | "date" | "filter">(null);
   const [objetivo, setObjetivo] = useState("auto");
   const [preset, setPreset] = useState("7d");
   const [rangeStart, setRangeStart] = useState(iso(d7));
@@ -133,6 +133,11 @@ export default function DashboardView({
   const [calM, setCalM] = useState(today.getMonth());
   const [pick, setPick] = useState<"start" | "end">("start");
   const [level, setLevel] = useState<"campaign" | "adset" | "ad">("campaign");
+  const [focus, setFocus] = useState<{ type: "campaign" | "adset" | "ad"; id: string; name: string } | null>(null);
+  const [filterTab, setFilterTab] = useState<"campaign" | "adset" | "ad">("campaign");
+  const [entities, setEntities] = useState<Record<string, { id: string; name: string; status: string }[]>>({});
+  const [entLoading, setEntLoading] = useState(false);
+  const [entSearch, setEntSearch] = useState("");
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -151,6 +156,10 @@ export default function DashboardView({
         objetivo,
         level,
       });
+      if (focus) {
+        q.set("focus_type", focus.type);
+        q.set("focus_id", focus.id);
+      }
       const res = await fetch(`/api/insights?${q}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error);
@@ -160,11 +169,32 @@ export default function DashboardView({
     } finally {
       setLoading(false);
     }
-  }, [client.id, rangeStart, rangeEnd, objetivo, level]);
+  }, [client.id, rangeStart, rangeEnd, objetivo, level, focus]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadEntities = useCallback(
+    async (tab: "campaign" | "adset" | "ad") => {
+      const key = `${client.id}:${tab}`;
+      if (entities[key]) return;
+      setEntLoading(true);
+      try {
+        const map = { campaign: "campaigns", adset: "adsets", ad: "ads" } as const;
+        const res = await fetch(`/api/entities?client_id=${client.id}&type=${map[tab]}`);
+        const json = await res.json();
+        if (res.ok) setEntities((e) => ({ ...e, [key]: json.entities }));
+      } finally {
+        setEntLoading(false);
+      }
+    },
+    [client.id, entities]
+  );
+
+  useEffect(() => {
+    if (open === "filter") loadEntities(filterTab);
+  }, [open, filterTab, loadEntities]);
 
   // ===== calendário =====
   function setPresetRange(k: string) {
@@ -280,19 +310,10 @@ export default function DashboardView({
   const dd = { position: "absolute" as const, top: "calc(100% + 8px)", zIndex: 50, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 14, padding: 7, boxShadow: "0 20px 44px -18px rgba(20,15,50,.4)" };
 
   return (
-    <main style={{ minHeight: "100vh", background: "#F5F6FA", padding: "22px 26px", fontFamily: BODY }} onClick={() => open && setOpen(null)}>
+    <main style={{ minHeight: "100vh", background: "#F5F6FA", padding: "22px 24px", fontFamily: BODY }} onClick={() => open && setOpen(null)}>
       <div style={{ maxWidth: 1180, margin: "0 auto" }}>
         {/* ===== TOP BAR ===== */}
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap", marginBottom: 18, position: "relative", zIndex: 45 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 11, marginRight: 6 }}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="LinoADS" style={{ width: 40, height: 40 }} />
-            <div style={{ display: "flex", flexDirection: "column", lineHeight: 1 }}>
-              <span style={{ font: `700 19px ${DISPLAY}`, color: NAVY, letterSpacing: "-.01em" }}>LinoADS</span>
-              <span style={{ font: `600 8px ${BODY}`, color: MUTED2, letterSpacing: ".16em" }}>ASSESSORIA DE MARKETING</span>
-            </div>
-          </div>
-
           {/* Client selector */}
           <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
             <button
@@ -318,7 +339,7 @@ export default function DashboardView({
                 {clients.map((c, i) => (
                   <button
                     key={c.id}
-                    onClick={() => { setClientIdx(i); setOpen(null); }}
+                    onClick={() => { setClientIdx(i); setFocus(null); setEntities({}); setOpen(null); }}
                     style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", border: "none", cursor: "pointer", background: i === clientIdx ? "#F5F6FA" : "transparent", borderRadius: 10, padding: "9px 10px", textAlign: "left" }}
                   >
                     <span style={{ width: 28, height: 28, borderRadius: 8, background: CLIENT_COLORS[i % CLIENT_COLORS.length], display: "flex", alignItems: "center", justifyContent: "center", font: `700 12px ${DISPLAY}`, color: "#fff", flexShrink: 0 }}>
@@ -363,6 +384,71 @@ export default function DashboardView({
                     )}
                   </button>
                 ))}
+              </div>
+            )}
+          </div>
+
+          {/* Filtro global: campanha / conjunto / anúncio */}
+          <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setOpen(open === "filter" ? null : "filter")}
+              style={{ display: "flex", alignItems: "center", gap: 9, background: focus ? "#1A1442" : "#fff", border: `1px solid ${focus ? "#1A1442" : BORDER}`, borderRadius: 13, padding: "12px 14px", cursor: "pointer", boxShadow: "0 1px 2px rgba(20,15,50,.04)" }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={focus ? "#F9C22E" : "#F5813C"} strokeWidth="2"><path d="M3 4h18l-7 8v6l-4 2v-8z" /></svg>
+              <span style={{ font: `700 13px ${DISPLAY}`, color: focus ? "#fff" : NAVY, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {focus ? focus.name : "Filtrar"}
+              </span>
+              {focus ? (
+                <span
+                  onClick={(e) => { e.stopPropagation(); setFocus(null); setOpen(null); }}
+                  style={{ display: "flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: 6, background: "rgba(255,255,255,.18)", cursor: "pointer" }}
+                >
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.5"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                </span>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="2"><path d="M6 9l6 6 6-6" /></svg>
+              )}
+            </button>
+            {open === "filter" && (
+              <div style={{ ...dd, left: 0, width: 330 }}>
+                <div style={{ display: "inline-flex", background: "#F4F5F9", borderRadius: 10, padding: 3, gap: 2, margin: "4px 4px 8px" }}>
+                  {[
+                    { k: "campaign", label: "Campanhas" },
+                    { k: "adset", label: "Conjuntos" },
+                    { k: "ad", label: "Anúncios" },
+                  ].map((t) => (
+                    <button
+                      key={t.k}
+                      onClick={() => setFilterTab(t.k as any)}
+                      style={{ border: "none", cursor: "pointer", padding: "7px 12px", borderRadius: 8, font: `600 12px ${BODY}`, background: filterTab === t.k ? "#fff" : "transparent", color: filterTab === t.k ? NAVY : MUTED, boxShadow: filterTab === t.k ? "0 1px 2px rgba(20,15,50,.08)" : "none" }}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+                <input
+                  value={entSearch}
+                  onChange={(e) => setEntSearch(e.target.value)}
+                  placeholder="Buscar..."
+                  style={{ width: "calc(100% - 8px)", margin: "0 4px 8px", borderRadius: 9, border: `1px solid ${BORDER}`, padding: "9px 11px", font: `600 12px ${BODY}`, color: NAVY, outline: "none" }}
+                />
+                <div style={{ maxHeight: 260, overflowY: "auto" }}>
+                  {entLoading && (
+                    <div style={{ font: `500 12px ${BODY}`, color: MUTED, padding: 12, textAlign: "center" }}>Carregando...</div>
+                  )}
+                  {(entities[`${client.id}:${filterTab}`] ?? [])
+                    .filter((e) => e.name.toLowerCase().includes(entSearch.toLowerCase()))
+                    .map((e) => (
+                      <button
+                        key={e.id}
+                        onClick={() => { setFocus({ type: filterTab, id: e.id, name: e.name }); setOpen(null); setEntSearch(""); }}
+                        style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", border: "none", cursor: "pointer", background: focus?.id === e.id ? "#F5F6FA" : "transparent", borderRadius: 10, padding: "9px 10px", textAlign: "left" }}
+                      >
+                        <span style={{ width: 7, height: 7, borderRadius: "50%", background: e.status === "ACTIVE" ? "#12A66A" : "#C9CBD6", flexShrink: 0 }} />
+                        <span style={{ font: `600 12px ${BODY}`, color: NAVY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}</span>
+                      </button>
+                    ))}
+                </div>
               </div>
             )}
           </div>
@@ -455,8 +541,23 @@ export default function DashboardView({
               Meta Ads
             </span>
           </div>
-          <div style={{ font: `500 12px ${BODY}`, color: MUTED }}>
-            {client.name} · Meta Ads · {dateLabel} · {userName}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {data?.account_info?.isPrepaid && (
+              <span style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 12, padding: "9px 14px", boxShadow: "0 1px 2px rgba(20,15,50,.04)" }}>
+                <span style={{ width: 26, height: 26, borderRadius: 8, background: "linear-gradient(135deg,#12A66A,#4FBF8B)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><rect x="2" y="6" width="20" height="13" rx="2.5" /><path d="M2 10h20" /></svg>
+                </span>
+                <span>
+                  <span style={{ display: "block", font: `600 9px ${BODY}`, color: MUTED, letterSpacing: ".04em", textTransform: "uppercase" }}>Saldo da conta</span>
+                  <span style={{ display: "block", font: `700 13px ${DISPLAY}`, color: NAVY }}>
+                    {data.account_info.displayString ?? fMoney2(data.account_info.balance)}
+                  </span>
+                </span>
+              </span>
+            )}
+            <div style={{ font: `500 12px ${BODY}`, color: MUTED }}>
+              {client.name} · Meta Ads{focus ? ` · ${focus.name}` : ""} · {dateLabel}
+            </div>
           </div>
         </div>
 
@@ -665,8 +766,20 @@ export default function DashboardView({
                 <span key={i} style={{ font: `600 10px ${BODY}`, letterSpacing: ".04em", textTransform: "uppercase", color: MUTED2, textAlign: i === 0 ? "left" : "right" }}>{h}</span>
               ))}
             </div>
-            {rows.map((r: any, i: number) => (
-              <div key={i} style={{ display: "grid", gridTemplateColumns: "2.1fr 1fr 0.9fr 1fr 1.1fr 1.1fr", alignItems: "center", padding: "13px 12px", borderRadius: 10 }}>
+            {rows.map((r: any, i: number) => {
+              const rid = data?.level === "ad" ? r.ad_id : data?.level === "adset" ? r.adset_id : r.campaign_id;
+              const isFocused = focus?.id === rid;
+              return (
+              <div
+                key={i}
+                onClick={() =>
+                  isFocused
+                    ? setFocus(null)
+                    : setFocus({ type: data?.level ?? "campaign", id: rid, name: rowName(r) })
+                }
+                title={isFocused ? "Clique para remover o filtro" : "Clique para filtrar o dashboard"}
+                style={{ display: "grid", gridTemplateColumns: "2.1fr 1fr 0.9fr 1fr 1.1fr 1.1fr", alignItems: "center", padding: "13px 12px", borderRadius: 10, cursor: "pointer", background: isFocused ? "#FDEEE1" : "transparent", outline: isFocused ? "1px solid #F5813C" : "none" }}
+              >
                 <span style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 3, background: FUNNEL_COLORS[i % FUNNEL_COLORS.length], flexShrink: 0 }} />
                   <span style={{ font: `600 13px ${BODY}`, color: NAVY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{rowName(r)}</span>
@@ -677,7 +790,8 @@ export default function DashboardView({
                 <span style={{ font: `600 12px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{r.costPerResult ? fMoney2(r.costPerResult) : "—"}</span>
                 <span style={{ font: `700 13px ${DISPLAY}`, color: NAVY, textAlign: "right" }}>{fMoney2(Number(r.spend))}</span>
               </div>
-            ))}
+              );
+            })}
             {!rows.length && !loading && (
               <div style={{ font: `500 13px ${BODY}`, color: MUTED, padding: 20, textAlign: "center" }}>Sem veiculação no período.</div>
             )}

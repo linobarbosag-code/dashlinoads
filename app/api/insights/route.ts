@@ -7,6 +7,7 @@ import {
   getInsights,
   getDaily,
   getBreakdown,
+  getAccountInfo,
   previousRange,
   detectObjetivo,
   extractResult,
@@ -15,6 +16,7 @@ import {
   RESULT_META,
   type Objetivo,
   type Range,
+  type Focus,
 } from "@/lib/meta-v2";
 
 export const maxDuration = 60;
@@ -34,6 +36,12 @@ export async function GET(req: NextRequest) {
   const until = sp.get("until");
   const objetivoParam = (sp.get("objetivo") ?? "auto") as Objetivo;
   const level = (sp.get("level") ?? "campaign") as "campaign" | "adset" | "ad";
+  const focusType = sp.get("focus_type");
+  const focusId = sp.get("focus_id");
+  const focus: Focus | null =
+    focusType && focusId && ["campaign", "adset", "ad"].includes(focusType)
+      ? { type: focusType as Focus["type"], id: focusId }
+      : null;
 
   if (!since || !until || !/^\d{4}-\d{2}-\d{2}$/.test(since) || !/^\d{4}-\d{2}-\d{2}$/.test(until)) {
     return NextResponse.json({ error: "Período inválido" }, { status: 400 });
@@ -52,14 +60,15 @@ export async function GET(req: NextRequest) {
 
   try {
     const prev = previousRange(range);
-    const [curArr, prevArr, rows, daily, gender, platform] =
+    const [curArr, prevArr, rows, daily, gender, platform, accountInfo] =
       await Promise.all([
-        getInsights(client.ad_account_id, range, "account"),
-        getInsights(client.ad_account_id, prev, "account"),
-        getInsights(client.ad_account_id, range, level),
-        getDaily(client.ad_account_id, range),
-        getBreakdown(client.ad_account_id, range, "gender"),
-        getBreakdown(client.ad_account_id, range, "publisher_platform"),
+        getInsights(client.ad_account_id, range, "account", focus),
+        getInsights(client.ad_account_id, prev, "account", focus),
+        getInsights(client.ad_account_id, range, level, focus),
+        getDaily(client.ad_account_id, range, focus),
+        getBreakdown(client.ad_account_id, range, "gender", focus),
+        getBreakdown(client.ad_account_id, range, "publisher_platform", focus),
+        getAccountInfo(client.ad_account_id).catch(() => null),
       ]);
 
     const cur = curArr[0] ?? null;
@@ -87,6 +96,8 @@ export async function GET(req: NextRequest) {
       funnel: cur ? buildFunnel(cur, objetivo) : [],
       rows: rows.map(enrich),
       level,
+      focus,
+      account_info: accountInfo,
       daily,
       gender: gender.map((g: any) => ({
         gender: g.gender,

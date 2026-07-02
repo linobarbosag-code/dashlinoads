@@ -1,18 +1,12 @@
-// app/(dashboard)/dashboard/page.tsx
-// Server component: resolve o usuário, os clientes vinculados e o papel.
-// Admin vê seletor com todos os clientes; cliente vê só a própria conta.
-
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import DashboardView from "@/components/dashboard-view";
 
 export const dynamic = "force-dynamic";
-import DashboardView from "@/components/dashboard-view";
 
 export default async function DashboardPage() {
   const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const { data: { user } } = await supabase.auth.getUser();
   if (!user) redirect("/login");
 
   const { data: profile } = await supabase
@@ -21,7 +15,6 @@ export default async function DashboardPage() {
     .eq("id", user.id)
     .single();
 
-  // RLS já filtra: admin recebe todos, cliente recebe só os vinculados
   const { data: clients } = await supabase
     .from("clients")
     .select("id, name, ad_account_id, currency")
@@ -30,7 +23,7 @@ export default async function DashboardPage() {
 
   if (!clients?.length) {
     return (
-      <main className="min-h-screen grid place-items-center bg-neutral-950 text-neutral-300">
+      <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", color: "#9096AA", fontFamily: "'Plus Jakarta Sans', sans-serif" }}>
         Nenhuma conta vinculada ao seu acesso. Fale com a agência.
       </main>
     );

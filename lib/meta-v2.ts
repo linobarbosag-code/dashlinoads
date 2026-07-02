@@ -59,6 +59,14 @@ async function metaFetch(path: string, params: Record<string, string>) {
 const rangeParam = (r: Range) =>
   JSON.stringify({ since: r.since, until: r.until });
 
+export interface Focus {
+  type: "campaign" | "adset" | "ad";
+  id: string;
+}
+
+const filteringParam = (f: Focus) =>
+  JSON.stringify([{ field: `${f.type}.id`, operator: "IN", value: [f.id] }]);
+
 /** Janela anterior de mesma duração (para os comparativos). */
 export function previousRange(r: Range): Range {
   const s = new Date(r.since + "T12:00:00");
@@ -76,7 +84,8 @@ export function previousRange(r: Range): Range {
 export async function getInsights(
   adAccountId: string,
   range: Range,
-  level: "account" | "campaign" | "adset" | "ad" = "account"
+  level: "account" | "campaign" | "adset" | "ad" = "account",
+  focus?: Focus | null
 ): Promise<MetaInsight[]> {
   const params: Record<string, string> = {
     fields: LEVEL_FIELDS[level],
@@ -84,6 +93,7 @@ export async function getInsights(
     limit: "100",
   };
   if (level !== "account") params.level = level;
+  if (focus) params.filtering = filteringParam(focus);
 
   const all: MetaInsight[] = [];
   let json = await metaFetch(`/${adAccountId}/insights`, params);
@@ -100,14 +110,17 @@ export async function getInsights(
 /** Série diária (gráficos). */
 export async function getDaily(
   adAccountId: string,
-  range: Range
+  range: Range,
+  focus?: Focus | null
 ): Promise<MetaInsight[]> {
-  const json = await metaFetch(`/${adAccountId}/insights`, {
+  const params: Record<string, string> = {
     fields: "spend,impressions,clicks,actions,date_start,date_stop",
     time_range: rangeParam(range),
     time_increment: "1",
     limit: "200",
-  });
+  };
+  if (focus) params.filtering = filteringParam(focus);
+  const json = await metaFetch(`/${adAccountId}/insights`, params);
   return json.data ?? [];
 }
 
@@ -115,15 +128,61 @@ export async function getDaily(
 export async function getBreakdown(
   adAccountId: string,
   range: Range,
-  breakdown: string
+  breakdown: string,
+  focus?: Focus | null
 ): Promise<MetaInsight[]> {
-  const json = await metaFetch(`/${adAccountId}/insights`, {
+  const params: Record<string, string> = {
     fields: "spend,impressions,clicks,actions",
     time_range: rangeParam(range),
     breakdowns: breakdown,
     limit: "50",
-  });
+  };
+  if (focus) params.filtering = filteringParam(focus);
+  const json = await metaFetch(`/${adAccountId}/insights`, params);
   return json.data ?? [];
+}
+
+/** Info da conta: saldo (pré-pago), moeda, status. */
+export async function getAccountInfo(adAccountId: string): Promise<{
+  balance: number;
+  currency: string;
+  isPrepaid: boolean;
+  displayString: string | null;
+  accountStatus: number;
+}> {
+  const json = await metaFetch(`/${adAccountId}`, {
+    fields: "balance,currency,funding_source_details,account_status",
+  });
+  const fs = json.funding_source_details ?? {};
+  // type 20 = pré-pago (Meta); display_string traz o saldo formatado quando existe
+  const isPrepaid = fs.type === 20 || /saldo|balance/i.test(fs.display_string ?? "");
+  return {
+    balance: Number(json.balance ?? 0) / 100,
+    currency: json.currency ?? "BRL",
+    isPrepaid,
+    displayString: fs.display_string ?? null,
+    accountStatus: Number(json.account_status ?? 1),
+  };
+}
+
+/** Lista leve de entidades (para o filtro global). */
+export async function listEntities(
+  adAccountId: string,
+  type: "campaigns" | "adsets" | "ads"
+): Promise<{ id: string; name: string; status: string }[]> {
+  const all: any[] = [];
+  let json = await metaFetch(`/${adAccountId}/${type}`, {
+    fields: "id,name,effective_status",
+    limit: "100",
+  });
+  all.push(...(json.data ?? []));
+  while (json.paging?.next && all.length < 500) {
+    const res = await fetch(json.paging.next);
+    json = await res.json();
+    if (json.error) break;
+    all.push(...(json.data ?? []));
+  }
+  return all.map((e) => ({ id: e.id, name: e.name, status: e.effective_status }));
 }
 
 // ===== Extração de resultado por objetivo =====
