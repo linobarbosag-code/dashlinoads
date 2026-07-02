@@ -1,3 +1,45 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  --bg: #0a0a0b;
+  --surface: #111113;
+  --surface-2: #17171a;
+  --border: #1f1f23;
+  --accent: #a78bfa;
+  --positive: #34d399;
+  --warn: #fbbf24;
+  --negative: #f87171;
+}
+
+body {
+  background: var(--bg);
+  color: #fafafa;
+}
+
+.glow-dot {
+  box-shadow: 0 0 8px 2px currentColor;
+}
+
+.card-hover {
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.card-hover:hover {
+  border-color: #2e2e35;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+:root {
+  --font-display: "Space Grotesk", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+}
+body {
+  font-family: var(--font-body);
+}
