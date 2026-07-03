@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
       .map(enrich)
       .filter((a: any) => Number(a.spend) > 0 || Number(a.impressions) > 0)
       .sort((a: any, b: any) => b.results - a.results || Number(b.spend) - Number(a.spend))
-      .slice(0, 3);
+      .slice(0, 5);
     const creatives = await getCreatives(topAds.map((a: any) => a.ad_id)).catch(() => ({}));
     const highlights = topAds.map((a: any) => ({
       ad_id: a.ad_id,

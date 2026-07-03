@@ -289,10 +289,11 @@ export default function DashboardView({
       ? ((funnel[funnel.length - 1].value / funnel[0].value) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "%"
       : "—";
 
-  const genderTotal = (data?.gender ?? []).reduce((a: number, g: any) => a + g.spend, 0);
+  const genderKnown = (data?.gender ?? []).filter((g: any) => g.gender !== "unknown");
+  const genderTotal = genderKnown.reduce((a: number, g: any) => a + g.spend, 0);
   const CIRC = 2 * Math.PI * 54;
   let segOffset = 0;
-  const genderSegs = (data?.gender ?? [])
+  const genderSegs = genderKnown
     .filter((g: any) => g.spend > 0)
     .map((g: any, i: number) => {
       const pct = genderTotal > 0 ? g.spend / genderTotal : 0;
@@ -686,7 +687,11 @@ export default function DashboardView({
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
               {funnel.map((f, i) => {
-                const width = Math.max((f.value / maxFunnel) * 100, 26);
+                // Escala log: preserva o formato de funil mesmo quando a 1ª etapa é ordens de grandeza maior
+                const width = Math.max(
+                  26,
+                  26 + 74 * (Math.log10(f.value + 1) / Math.log10(maxFunnel + 1))
+                );
                 const costPer = f.value > 0 ? spend / f.value : null;
                 return (
                   <div key={i} style={{ display: "grid", gridTemplateColumns: "74px 1fr 148px", alignItems: "center", gap: 12 }}>
