@@ -33,7 +33,7 @@ export interface MetaInsight {
 }
 
 const BASE_FIELDS =
-  "spend,impressions,reach,clicks,inline_link_clicks,ctr,cpc,cpm,actions,cost_per_action_type,purchase_roas";
+  "spend,impressions,reach,clicks,inline_link_clicks,ctr,cpc,cpm,actions,action_values,cost_per_action_type,purchase_roas";
 
 const LEVEL_FIELDS: Record<string, string> = {
   account: BASE_FIELDS,
@@ -61,11 +61,11 @@ const rangeParam = (r: Range) =>
 
 export interface Focus {
   type: "campaign" | "adset" | "ad";
-  id: string;
+  ids: string[];
 }
 
 const filteringParam = (f: Focus) =>
-  JSON.stringify([{ field: `${f.type}.id`, operator: "IN", value: [f.id] }]);
+  JSON.stringify([{ field: `${f.type}.id`, operator: "IN", value: f.ids }]);
 
 /** Janela anterior de mesma duração (para os comparativos). */
 export function previousRange(r: Range): Range {
@@ -190,12 +190,14 @@ export async function listEntities(
 export type Objetivo =
   | "auto"
   | "compras"
+  | "infoproduto"
   | "leads"
   | "conversas"
   | "engajamento";
 
 const ACTION_SETS: Record<Exclude<Objetivo, "auto">, string[]> = {
   compras: ["purchase", "offsite_conversion.fb_pixel_purchase", "omni_purchase"],
+  infoproduto: ["purchase", "offsite_conversion.fb_pixel_purchase", "omni_purchase"],
   leads: ["lead", "offsite_conversion.fb_pixel_lead", "onsite_conversion.lead_grouped"],
   conversas: ["onsite_conversion.messaging_conversation_started_7d"],
   engajamento: ["post_engagement"],
@@ -213,6 +215,7 @@ export const RESULT_META: Record<
   { resultKey: string; custoKey: string; custoShort: string }
 > = {
   compras: { resultKey: "Compras", custoKey: "Custo por compra", custoShort: "Custo/compra" },
+  infoproduto: { resultKey: "Compras", custoKey: "Custo por compra", custoShort: "Custo/compra" },
   leads: { resultKey: "Leads", custoKey: "Custo por lead", custoShort: "CPL" },
   conversas: { resultKey: "Conversas", custoKey: "Custo por conversa", custoShort: "Custo/conv." },
   engajamento: { resultKey: "Engajamentos", custoKey: "Custo por engaj.", custoShort: "Custo/eng." },
@@ -250,6 +253,19 @@ export function extractRoas(insight: MetaInsight): number | null {
   return r ? Number(r.value) : null;
 }
 
+/** Valor de conversão (receita de compras atribuída pelo pixel). */
+export function extractConversionValue(insight: MetaInsight): number | null {
+  const values = (insight as any).action_values as
+    | { action_type: string; value: string }[]
+    | undefined;
+  if (!values?.length) return null;
+  for (const t of ACTION_SETS.compras) {
+    const v = values.find((x) => x.action_type === t);
+    if (v) return Number(v.value);
+  }
+  return null;
+}
+
 /** Etapas do funil montadas com as actions reais disponíveis. */
 export function buildFunnel(
   insight: MetaInsight,
@@ -274,6 +290,10 @@ export function buildFunnel(
     push("Adicionou ao carrinho", ["add_to_cart", "offsite_conversion.fb_pixel_add_to_cart", "omni_add_to_cart"]);
     push("Iniciou checkout", ["initiate_checkout", "offsite_conversion.fb_pixel_initiate_checkout", "omni_initiated_checkout"]);
     push("Compras", ACTION_SETS.compras);
+  } else if (objetivo === "infoproduto") {
+    push("Visualizou página", ["landing_page_view"]);
+    push("Iniciou checkout", ["initiate_checkout", "offsite_conversion.fb_pixel_initiate_checkout", "omni_initiated_checkout"]);
+    push("Compras", ACTION_SETS.infoproduto);
   } else if (objetivo === "leads") {
     push("Visualizou página", ["landing_page_view"]);
     push("Leads", ACTION_SETS.leads);
@@ -286,4 +306,27 @@ export function buildFunnel(
   }
   void spend;
   return stages;
+}
+
+
+/** Criativos de uma lista de anúncios (miniatura grande, imagem e permalink). */
+export async function getCreatives(
+  adIds: string[]
+): Promise<Record<string, { thumb: string | null; image: string | null; permalink: string | null }>> {
+  if (!adIds.length) return {};
+  const json = await metaFetch(`/`, {
+    ids: adIds.join(","),
+    fields:
+      "creative.thumbnail_width(600).thumbnail_height(600){thumbnail_url,image_url,instagram_permalink_url}",
+  });
+  const out: Record<string, { thumb: string | null; image: string | null; permalink: string | null }> = {};
+  for (const id of adIds) {
+    const c = json[id]?.creative ?? {};
+    out[id] = {
+      thumb: c.thumbnail_url ?? null,
+      image: c.image_url ?? c.thumbnail_url ?? null,
+      permalink: c.instagram_permalink_url ?? null,
+    };
+  }
+  return out;
 }

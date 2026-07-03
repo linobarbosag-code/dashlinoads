@@ -58,6 +58,7 @@ export default function Sidebar({
 
   return (
     <aside
+      className="app-sidebar"
       style={{
         width: 232,
         flexShrink: 0,
@@ -113,8 +114,8 @@ export default function Sidebar({
           })}
       </nav>
 
-      <div style={{ marginTop: "auto", borderTop: "1px solid #F0F1F6", paddingTop: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 8px 12px" }}>
+      <div className="sidebar-footer" style={{ marginTop: "auto", borderTop: "1px solid #F0F1F6", paddingTop: 14 }}>
+        <div className="sidebar-user" style={{ display: "flex", alignItems: "center", gap: 10, padding: "0 8px 12px" }}>
           <span
             style={{
               width: 32,

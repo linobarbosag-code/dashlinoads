@@ -20,7 +20,7 @@ export default async function DashboardLayout({
     .single();
 
   return (
-    <div style={{ display: "flex", minHeight: "100vh", background: "#F5F6FA" }}>
+    <div className="app-shell" style={{ display: "flex", minHeight: "100vh", background: "#F5F6FA" }}>
       <Sidebar
         userName={profile?.full_name ?? ""}
         isAdmin={profile?.role === "admin"}

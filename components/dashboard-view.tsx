@@ -35,6 +35,7 @@ const SEG_COLORS = ["#E8336E", "#F5813C", "#F9C22E", "#12A66A", "#8B5CF6"];
 const OBJ_OPTIONS = [
   { key: "auto", label: "Automático" },
   { key: "compras", label: "E-commerce (Compras)" },
+  { key: "infoproduto", label: "Infoproduto (Compras)" },
   { key: "leads", label: "Cadastro (Leads)" },
   { key: "conversas", label: "Mensagem (Conversas)" },
   { key: "engajamento", label: "Engajamento" },
@@ -50,6 +51,8 @@ const PLATFORM_LABEL: Record<string, string> = {
   instagram: "Instagram",
   audience_network: "Audience Network",
   messenger: "Messenger",
+  threads: "Threads",
+  unknown: "Outros",
 };
 
 // ===== Formatadores =====
@@ -133,7 +136,8 @@ export default function DashboardView({
   const [calM, setCalM] = useState(today.getMonth());
   const [pick, setPick] = useState<"start" | "end">("start");
   const [level, setLevel] = useState<"campaign" | "adset" | "ad">("campaign");
-  const [focus, setFocus] = useState<{ type: "campaign" | "adset" | "ad"; id: string; name: string } | null>(null);
+  const [focus, setFocus] = useState<{ type: "campaign" | "adset" | "ad"; ids: string[]; names: string[] } | null>(null);
+  const [preview, setPreview] = useState<any>(null);
   const [filterTab, setFilterTab] = useState<"campaign" | "adset" | "ad">("campaign");
   const [entities, setEntities] = useState<Record<string, { id: string; name: string; status: string }[]>>({});
   const [entLoading, setEntLoading] = useState(false);
@@ -158,7 +162,7 @@ export default function DashboardView({
       });
       if (focus) {
         q.set("focus_type", focus.type);
-        q.set("focus_id", focus.id);
+        q.set("focus_ids", focus.ids.join(","));
       }
       const res = await fetch(`/api/insights?${q}`);
       const json = await res.json();
@@ -195,6 +199,24 @@ export default function DashboardView({
   useEffect(() => {
     if (open === "filter") loadEntities(filterTab);
   }, [open, filterTab, loadEntities]);
+
+  function toggleFocus(type: "campaign" | "adset" | "ad", id: string, name: string) {
+    setFocus((f) => {
+      if (!f || f.type !== type) return { type, ids: [id], names: [name] };
+      const idx = f.ids.indexOf(id);
+      if (idx >= 0) {
+        const ids = f.ids.filter((x) => x !== id);
+        const names = f.names.filter((_, i) => i !== idx);
+        return ids.length ? { type, ids, names } : null;
+      }
+      return { type, ids: [...f.ids, id], names: [...f.names, name] };
+    });
+  }
+  const focusLabel = focus
+    ? focus.ids.length === 1
+      ? focus.names[0]
+      : `${focus.ids.length} ${focus.type === "campaign" ? "campanhas" : focus.type === "adset" ? "conjuntos" : "anúncios"}`
+    : null;
 
   // ===== calendário =====
   function setPresetRange(k: string) {
@@ -396,7 +418,7 @@ export default function DashboardView({
             >
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={focus ? "#F9C22E" : "#F5813C"} strokeWidth="2"><path d="M3 4h18l-7 8v6l-4 2v-8z" /></svg>
               <span style={{ font: `700 13px ${DISPLAY}`, color: focus ? "#fff" : NAVY, maxWidth: 180, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {focus ? focus.name : "Filtrar"}
+                {focusLabel ?? "Filtrar"}
               </span>
               {focus ? (
                 <span
@@ -438,16 +460,22 @@ export default function DashboardView({
                   )}
                   {(entities[`${client.id}:${filterTab}`] ?? [])
                     .filter((e) => e.name.toLowerCase().includes(entSearch.toLowerCase()))
-                    .map((e) => (
+                    .map((e) => {
+                      const checked = focus?.type === filterTab && focus.ids.includes(e.id);
+                      return (
                       <button
                         key={e.id}
-                        onClick={() => { setFocus({ type: filterTab, id: e.id, name: e.name }); setOpen(null); setEntSearch(""); }}
-                        style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", border: "none", cursor: "pointer", background: focus?.id === e.id ? "#F5F6FA" : "transparent", borderRadius: 10, padding: "9px 10px", textAlign: "left" }}
+                        onClick={() => toggleFocus(filterTab, e.id, e.name)}
+                        style={{ display: "flex", alignItems: "center", gap: 9, width: "100%", border: "none", cursor: "pointer", background: checked ? "#FDEEE1" : "transparent", borderRadius: 10, padding: "9px 10px", textAlign: "left" }}
                       >
+                        <span style={{ width: 16, height: 16, borderRadius: 5, border: checked ? "none" : `1.5px solid #C9CBD6`, background: checked ? "linear-gradient(135deg,#E8336E,#F5813C)" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          {checked && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5"><path d="M20 6L9 17l-5-5" /></svg>}
+                        </span>
                         <span style={{ width: 7, height: 7, borderRadius: "50%", background: e.status === "ACTIVE" ? "#12A66A" : "#C9CBD6", flexShrink: 0 }} />
                         <span style={{ font: `600 12px ${BODY}`, color: NAVY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}</span>
                       </button>
-                    ))}
+                      );
+                    })}
                 </div>
               </div>
             )}
@@ -556,7 +584,7 @@ export default function DashboardView({
               </span>
             )}
             <div style={{ font: `500 12px ${BODY}`, color: MUTED }}>
-              {client.name} · Meta Ads{focus ? ` · ${focus.name}` : ""} · {dateLabel}
+              {client.name} · Meta Ads{focusLabel ? ` · ${focusLabel}` : ""} · {dateLabel}
             </div>
           </div>
         </div>
@@ -568,7 +596,7 @@ export default function DashboardView({
         )}
 
         {/* ===== KPI GRID ===== */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, marginBottom: 16 }}>
+        <div className="kpi-grid" style={{ display: "grid", gap: 14, marginBottom: 16 }}>
           {[
             {
               key: "invest",
@@ -591,6 +619,15 @@ export default function DashboardView({
               value: acc ? (acc.costPerResult ? fMoney2(acc.costPerResult) : "—") : null,
               delta: acc ? <Delta cur={acc.costPerResult ?? 0} prev={prv?.costPerResult ?? null} invert /> : null,
             },
+            ...(["compras", "infoproduto"].includes(data?.objetivo)
+              ? [{
+                  key: "valorconv",
+                  icon: <KpiIcon grad="linear-gradient(135deg,#D9308A,#E8336E)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><circle cx="9" cy="21" r="1.5" /><circle cx="19" cy="21" r="1.5" /><path d="M2 3h3l3 13h11l3-9H7" /></svg></KpiIcon>,
+                  label: "Valor de conversão · Vendas",
+                  value: acc ? (acc.conversionValue ? fMoney2(acc.conversionValue) : "—") : null,
+                  delta: acc ? <Delta cur={acc.conversionValue ?? 0} prev={prv?.conversionValue ?? null} suffix="vs período anterior" /> : null,
+                }]
+              : []),
             {
               key: "retorno",
               icon: <KpiIcon grad="linear-gradient(135deg,#12A66A,#4FBF8B)"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v10M9.5 9.5A2.5 2.5 0 0 1 12 8c1.5 0 2.5 1 2.5 2s-1 2-2.5 2-2.5 1-2.5 2 1 2 2.5 2a2.5 2.5 0 0 0 2.5-1.5" /></svg></KpiIcon>,
@@ -631,7 +668,7 @@ export default function DashboardView({
         </div>
 
         {/* ===== FUNIL + COLUNA DIREITA ===== */}
-        <div style={{ display: "grid", gridTemplateColumns: "1.55fr 1fr", gap: 16, marginBottom: 16, alignItems: "start" }}>
+        <div className="mid-grid" style={{ display: "grid", gap: 16, marginBottom: 16, alignItems: "start" }}>
           <div style={{ ...CARD, padding: "22px 24px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
@@ -738,7 +775,7 @@ export default function DashboardView({
         </div>
 
         {/* ===== TABELA + DESTAQUES ===== */}
-        <div style={{ display: "grid", gridTemplateColumns: "1.75fr 1fr", gap: 16, alignItems: "start" }}>
+        <div className="bottom-grid" style={{ display: "grid", gap: 16, alignItems: "start" }}>
           <div style={{ ...CARD, padding: "20px 22px 12px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <div style={{ font: `700 15px ${DISPLAY}`, color: NAVY }}>Visão geral</div>
@@ -758,7 +795,8 @@ export default function DashboardView({
                 ))}
               </div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "2.1fr 1fr 0.9fr 1fr 1.1fr 1.1fr", padding: "8px 12px", borderBottom: "1px solid #F0F1F6" }}>
+            <div className="table-wrap">
+            <div className="table-grid" style={{ display: "grid", padding: "8px 12px", borderBottom: "1px solid #F0F1F6" }}>
               {[
                 level === "ad" ? "Anúncio" : level === "adset" ? "Conjunto" : "Campanha",
                 meta.resultKey, "CTR", "Cliques", meta.custoShort, "Investido",
@@ -768,17 +806,14 @@ export default function DashboardView({
             </div>
             {rows.map((r: any, i: number) => {
               const rid = data?.level === "ad" ? r.ad_id : data?.level === "adset" ? r.adset_id : r.campaign_id;
-              const isFocused = focus?.id === rid;
+              const isFocused = focus !== null && focus.type === (data?.level ?? "campaign") && focus.ids.includes(rid);
               return (
               <div
                 key={i}
-                onClick={() =>
-                  isFocused
-                    ? setFocus(null)
-                    : setFocus({ type: data?.level ?? "campaign", id: rid, name: rowName(r) })
-                }
+                onClick={() => toggleFocus(data?.level ?? "campaign", rid, rowName(r))}
                 title={isFocused ? "Clique para remover o filtro" : "Clique para filtrar o dashboard"}
-                style={{ display: "grid", gridTemplateColumns: "2.1fr 1fr 0.9fr 1fr 1.1fr 1.1fr", alignItems: "center", padding: "13px 12px", borderRadius: 10, cursor: "pointer", background: isFocused ? "#FDEEE1" : "transparent", outline: isFocused ? "1px solid #F5813C" : "none" }}
+                className="table-grid"
+                style={{ display: "grid", alignItems: "center", padding: "13px 12px", borderRadius: 10, cursor: "pointer", background: isFocused ? "#FDEEE1" : "transparent", outline: isFocused ? "1px solid #F5813C" : "none" }}
               >
                 <span style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 3, background: FUNNEL_COLORS[i % FUNNEL_COLORS.length], flexShrink: 0 }} />
@@ -792,6 +827,7 @@ export default function DashboardView({
               </div>
               );
             })}
+            </div>
             {!rows.length && !loading && (
               <div style={{ font: `500 13px ${BODY}`, color: MUTED, padding: 20, textAlign: "center" }}>Sem veiculação no período.</div>
             )}
@@ -799,28 +835,83 @@ export default function DashboardView({
 
           <div style={{ ...CARD, padding: "20px 22px" }}>
             <div style={{ font: `700 15px ${DISPLAY}`, color: NAVY, marginBottom: 3 }}>Destaques</div>
-            <div style={{ font: `500 11px ${BODY}`, color: MUTED, marginBottom: 14 }}>melhores desempenhos do período</div>
+            <div style={{ font: `500 11px ${BODY}`, color: MUTED, marginBottom: 14 }}>criativos com mais resultados no período</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {destaques.map((d: any, i: number) => (
-                <div key={i} style={{ display: "flex", gap: 12, alignItems: "center", padding: 10, border: "1px solid #F0F1F6", borderRadius: 12 }}>
-                  <span style={{ width: 48, height: 48, borderRadius: 10, background: `linear-gradient(135deg,${FUNNEL_COLORS[i]},${FUNNEL_COLORS[i + 2] ?? "#F9C22E"})`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="9" cy="9" r="2" /><path d="M21 15l-5-5L5 21" /></svg>
-                  </span>
+              {(data?.highlights ?? []).map((d: any, i: number) => (
+                <button
+                  key={d.ad_id}
+                  onClick={() => setPreview(d)}
+                  style={{ display: "flex", gap: 12, alignItems: "center", padding: 10, border: "1px solid #F0F1F6", borderRadius: 12, background: "#fff", cursor: "pointer", textAlign: "left", width: "100%" }}
+                >
+                  {d.thumb ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img src={d.thumb} alt="" style={{ width: 52, height: 52, borderRadius: 10, objectFit: "cover", flexShrink: 0, background: "#F4F5F9" }} />
+                  ) : (
+                    <span style={{ width: 52, height: 52, borderRadius: 10, background: `linear-gradient(135deg,${FUNNEL_COLORS[i]},${FUNNEL_COLORS[i + 2] ?? "#F9C22E"})`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="9" cy="9" r="2" /><path d="M21 15l-5-5L5 21" /></svg>
+                    </span>
+                  )}
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ font: `600 13px ${BODY}`, color: NAVY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{rowName(d)}</div>
+                    <div style={{ font: `600 13px ${BODY}`, color: NAVY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.name}</div>
                     <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
                       <span style={{ font: `600 11px ${BODY}`, color: "#6A6A85" }}>{fInt(d.results)} {meta.resultKey.toLowerCase()}</span>
                       <span style={{ font: `600 11px ${BODY}`, color: "#EF6D2E" }}>{d.costPerResult ? fMoney2(d.costPerResult) : "—"}</span>
                     </div>
                   </div>
-                </div>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C9CBD6" strokeWidth="2"><path d="M15 3h6v6M10 14L21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>
+                </button>
               ))}
-              {!destaques.length && !loading && (
+              {!(data?.highlights ?? []).length && !loading && (
                 <span style={{ font: `500 12px ${BODY}`, color: MUTED }}>Sem dados no período.</span>
               )}
             </div>
           </div>
         </div>
+
+        {preview && (
+          <div
+            onClick={() => setPreview(null)}
+            style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(26,20,66,.55)", backdropFilter: "blur(3px)", display: "grid", placeItems: "center", padding: 20 }}
+          >
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 440, overflow: "hidden", boxShadow: "0 30px 70px -20px rgba(20,15,50,.5)" }}>
+              {preview.image ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={preview.image} alt={preview.name} style={{ width: "100%", maxHeight: 440, objectFit: "contain", background: "#0E0A26", display: "block" }} />
+              ) : (
+                <div style={{ height: 200, background: "linear-gradient(135deg,#E8336E,#F5813C,#F9C22E)", display: "grid", placeItems: "center", font: `700 15px ${DISPLAY}`, color: "#fff" }}>
+                  Prévia indisponível
+                </div>
+              )}
+              <div style={{ padding: "18px 20px" }}>
+                <div style={{ font: `700 14px ${BODY}`, color: NAVY, marginBottom: 10 }}>{preview.name}</div>
+                <div style={{ display: "flex", gap: 18, marginBottom: 16 }}>
+                  <div>
+                    <div style={{ font: `600 9px ${BODY}`, color: MUTED, textTransform: "uppercase", letterSpacing: ".05em" }}>{meta.resultKey}</div>
+                    <div style={{ font: `700 18px ${DISPLAY}`, color: NAVY }}>{fInt(preview.results)}</div>
+                  </div>
+                  <div>
+                    <div style={{ font: `600 9px ${BODY}`, color: MUTED, textTransform: "uppercase", letterSpacing: ".05em" }}>{meta.custoShort}</div>
+                    <div style={{ font: `700 18px ${DISPLAY}`, color: NAVY }}>{preview.costPerResult ? fMoney2(preview.costPerResult) : "—"}</div>
+                  </div>
+                  <div>
+                    <div style={{ font: `600 9px ${BODY}`, color: MUTED, textTransform: "uppercase", letterSpacing: ".05em" }}>Investido</div>
+                    <div style={{ font: `700 18px ${DISPLAY}`, color: NAVY }}>{fMoney2(preview.spend)}</div>
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  {preview.permalink && (
+                    <a href={preview.permalink} target="_blank" rel="noreferrer" style={{ flex: 1, textAlign: "center", textDecoration: "none", borderRadius: 11, padding: "11px 0", font: `700 12px ${DISPLAY}`, color: "#fff", background: "linear-gradient(135deg,#E8336E,#F5813C)" }}>
+                      Ver no Instagram
+                    </a>
+                  )}
+                  <button onClick={() => setPreview(null)} style={{ flex: 1, border: "1px solid #E2E4EE", cursor: "pointer", background: "#fff", borderRadius: 11, padding: "11px 0", font: `700 12px ${DISPLAY}`, color: INK2 }}>
+                    Fechar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {data?.fetched_at && (
           <p style={{ font: `500 11px ${BODY}`, color: MUTED2, marginTop: 18 }}>

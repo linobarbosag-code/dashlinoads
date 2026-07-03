@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
   if (!(await requireAdmin()))
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const { full_name, email, password, client_id } = await req.json();
+  const { full_name, email, password, client_ids } = await req.json();
   if (!full_name || !email || !password)
     return NextResponse.json({ error: "Nome, email e senha são obrigatórios" }, { status: 400 });
   if (String(password).length < 8)
@@ -60,10 +60,11 @@ export async function POST(req: NextRequest) {
   // O trigger cria o profile; garante o nome
   await db.from("profiles").update({ full_name }).eq("id", userId);
 
-  if (client_id) {
+  const ids: string[] = Array.isArray(client_ids) ? client_ids.filter(Boolean) : [];
+  if (ids.length) {
     const { error: linkErr } = await db
       .from("client_users")
-      .insert({ user_id: userId, client_id });
+      .insert(ids.map((client_id: string) => ({ user_id: userId, client_id })));
     if (linkErr)
       return NextResponse.json({ error: "Usuário criado, mas falhou o vínculo: " + linkErr.message }, { status: 400 });
   }

@@ -12,7 +12,9 @@ import {
   detectObjetivo,
   extractResult,
   extractRoas,
+  extractConversionValue,
   buildFunnel,
+  getCreatives,
   RESULT_META,
   type Objetivo,
   type Range,
@@ -37,10 +39,10 @@ export async function GET(req: NextRequest) {
   const objetivoParam = (sp.get("objetivo") ?? "auto") as Objetivo;
   const level = (sp.get("level") ?? "campaign") as "campaign" | "adset" | "ad";
   const focusType = sp.get("focus_type");
-  const focusId = sp.get("focus_id");
+  const focusIds = (sp.get("focus_ids") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
   const focus: Focus | null =
-    focusType && focusId && ["campaign", "adset", "ad"].includes(focusType)
-      ? { type: focusType as Focus["type"], id: focusId }
+    focusType && focusIds.length && ["campaign", "adset", "ad"].includes(focusType)
+      ? { type: focusType as Focus["type"], ids: focusIds }
       : null;
 
   if (!since || !until || !/^\d{4}-\d{2}-\d{2}$/.test(since) || !/^\d{4}-\d{2}-\d{2}$/.test(until)) {
@@ -85,7 +87,30 @@ export async function GET(req: NextRequest) {
       ...i,
       ...extractResult(i, objetivo),
       roas: extractRoas(i),
+      conversionValue: extractConversionValue(i),
     });
+
+    // Destaques: sempre os anúncios com mais resultados no período, com criativo
+    const adRows =
+      level === "ad" ? rows : await getInsights(client.ad_account_id, range, "ad", focus);
+    const topAds = adRows
+      .map(enrich)
+      .filter((a: any) => Number(a.spend) > 0 || Number(a.impressions) > 0)
+      .sort((a: any, b: any) => b.results - a.results || Number(b.spend) - Number(a.spend))
+      .slice(0, 3);
+    const creatives = await getCreatives(topAds.map((a: any) => a.ad_id)).catch(() => ({}));
+    const highlights = topAds.map((a: any) => ({
+      ad_id: a.ad_id,
+      name: a.ad_name,
+      results: a.results,
+      costPerResult: a.costPerResult,
+      spend: Number(a.spend),
+      ...(creatives as any)[a.ad_id],
+    }));
+
+    const delivered = rows
+      .map(enrich)
+      .filter((r: any) => Number(r.spend) > 0 || Number(r.impressions) > 0);
 
     return NextResponse.json({
       client: { name: client.name, currency: client.currency },
@@ -94,7 +119,8 @@ export async function GET(req: NextRequest) {
       account: cur ? enrich(cur) : null,
       previous: prv ? enrich(prv) : null,
       funnel: cur ? buildFunnel(cur, objetivo) : [],
-      rows: rows.map(enrich),
+      highlights,
+      rows: delivered,
       level,
       focus,
       account_info: accountInfo,

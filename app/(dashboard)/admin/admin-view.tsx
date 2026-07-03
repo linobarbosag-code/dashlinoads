@@ -63,7 +63,7 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
   const [uName, setUName] = useState("");
   const [uEmail, setUEmail] = useState("");
   const [uPass, setUPass] = useState("");
-  const [uClient, setUClient] = useState("");
+  const [uClients, setUClients] = useState<string[]>([]);
   const [savingUser, setSavingUser] = useState(false);
 
   const flash = (ok: boolean, text: string) => {
@@ -119,7 +119,7 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
         full_name: uName,
         email: uEmail,
         password: uPass,
-        client_id: uClient || null,
+        client_ids: uClients,
       }),
     });
     const json = await res.json();
@@ -128,7 +128,7 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
     setUName("");
     setUEmail("");
     setUPass("");
-    setUClient("");
+    setUClients([]);
     flash(true, "Acesso criado. O cliente já pode entrar com o email e a senha definidos.");
     loadUsers();
   }
@@ -198,13 +198,28 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
               <input style={input} type="text" value={uPass} onChange={(e) => setUPass(e.target.value)} />
             </div>
             <div>
-              <label style={label}>Conta de anúncio</label>
-              <select style={{ ...input, padding: "11px 10px" }} value={uClient} onChange={(e) => setUClient(e.target.value)}>
-                <option value="">Selecione...</option>
-                {clients.filter((c) => c.active).map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
+              <label style={label}>Contas de anúncio ({uClients.length} selecionada{uClients.length === 1 ? "" : "s"})</label>
+              <div style={{ border: "1px solid #E2E4EE", borderRadius: 11, maxHeight: 132, overflowY: "auto", padding: 4 }}>
+                {clients.filter((c) => c.active).map((c) => {
+                  const checked = uClients.includes(c.id);
+                  return (
+                    <button
+                      key={c.id}
+                      onClick={() =>
+                        setUClients((list) =>
+                          checked ? list.filter((x) => x !== c.id) : [...list, c.id]
+                        )
+                      }
+                      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", border: "none", cursor: "pointer", background: checked ? "#FDEEE1" : "transparent", borderRadius: 8, padding: "8px 9px", textAlign: "left" }}
+                    >
+                      <span style={{ width: 15, height: 15, borderRadius: 5, border: checked ? "none" : "1.5px solid #C9CBD6", background: checked ? "linear-gradient(135deg,#E8336E,#F5813C)" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        {checked && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5"><path d="M20 6L9 17l-5-5" /></svg>}
+                      </span>
+                      <span style={{ font: `600 12px ${BODY}`, color: NAVY }}>{c.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
           <button style={{ ...primaryBtn, opacity: savingUser ? 0.6 : 1 }} disabled={savingUser} onClick={addUser}>
