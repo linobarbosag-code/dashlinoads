@@ -1,0 +1,76 @@
+// Cron horário: relatórios semanais agendados + alerta de saldo baixo
+import { NextRequest, NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/server";
+import { sendWeeklyReport } from "@/lib/report-send";
+import { sendText } from "@/lib/whatsapp";
+import { getAccountInfo } from "@/lib/meta-v2";
+
+export const maxDuration = 300;
+
+export async function GET(req: NextRequest) {
+  if (req.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  const db = createAdminClient();
+  const now = new Date(Date.now() - 4 * 3600e3); // America/Campo_Grande (UTC-4, sem horário de verão)
+  const day = now.getUTCDay();
+  const hour = now.getUTCHours();
+
+  const { data: rows } = await db
+    .from("notification_settings")
+    .select("*, clients(id, name, ad_account_id, active)")
+    .not("group_id", "is", null);
+
+  const out: Record<string, string> = {};
+  for (const s of rows ?? []) {
+    const client = (s as any).clients;
+    if (!client?.active) continue;
+    const tag = client.name;
+
+    // ===== Relatório semanal
+    if (s.weekly_enabled && s.weekly_day === day && s.weekly_hour === hour) {
+      const last = s.last_weekly_sent ? new Date(s.last_weekly_sent).getTime() : 0;
+      if (Date.now() - last > 6 * 86400e3) {
+        try {
+          const r = await sendWeeklyReport({ ...client, group_id: s.group_id });
+          if (!r.skipped) {
+            await db.from("notification_settings").update({ last_weekly_sent: new Date().toISOString() }).eq("client_id", client.id);
+            await db.from("notification_log").insert({ client_id: client.id, type: "weekly_report", status: "sent", detail: `Automático · ${r.period}` });
+            out[tag] = "relatório enviado";
+          } else {
+            out[tag] = `pulado: ${r.reason}`;
+          }
+        } catch (e: any) {
+          await db.from("notification_log").insert({ client_id: client.id, type: "weekly_report", status: "error", detail: e.message });
+          out[tag] = `erro: ${e.message}`;
+        }
+      }
+    }
+
+    // ===== Saldo baixo (só pré-pago)
+    if (s.low_balance_enabled) {
+      try {
+        const info = await getAccountInfo(client.ad_account_id);
+        if (info.isPrepaid) {
+          const threshold = Number(s.low_balance_threshold);
+          if (info.balance > 0 && info.balance < threshold && !s.low_balance_alerted) {
+            await sendText(
+              s.group_id,
+              `⚠️ *Aviso de saldo — ${client.name}*\n\nO saldo da conta de anúncios está em *R$ ${info.balance.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*, abaixo do limite de R$ ${threshold.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.\n\nPara as campanhas não pausarem, recomendamos recarregar a conta. Qualquer dúvida estamos à disposição!\n_Equipe LinoADS_`
+            );
+            await db.from("notification_settings").update({ low_balance_alerted: true }).eq("client_id", client.id);
+            await db.from("notification_log").insert({ client_id: client.id, type: "low_balance", status: "sent", detail: `Saldo R$ ${info.balance.toFixed(2)} < R$ ${threshold.toFixed(2)}` });
+            out[tag] = (out[tag] ? out[tag] + " · " : "") + "alerta de saldo enviado";
+          }
+          // Rearma o alerta quando o saldo se recupera (20% acima do limite)
+          if (s.low_balance_alerted && info.balance > threshold * 1.2) {
+            await db.from("notification_settings").update({ low_balance_alerted: false }).eq("client_id", client.id);
+          }
+        }
+      } catch (e: any) {
+        out[tag] = (out[tag] ? out[tag] + " · " : "") + `saldo erro: ${e.message}`;
+      }
+    }
+  }
+  return NextResponse.json({ hour, day, results: out });
+}
