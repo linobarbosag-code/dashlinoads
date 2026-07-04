@@ -15,6 +15,11 @@ export async function GET(req: NextRequest) {
   const now = new Date(Date.now() - 4 * 3600e3); // America/Campo_Grande (UTC-4, sem horário de verão)
   const day = now.getUTCDay();
   const hour = now.getUTCHours();
+  const minute = now.getUTCMinutes();
+  const firstRunOfHour = minute < 10;
+  const MAX_REPORTS_PER_RUN = 3;      // escalona envios: evita rajada no WhatsApp e timeout
+  const DELAY_BETWEEN_SENDS = 8000;    // pausa entre relatórios (cadência humana)
+  let sentThisRun = 0;
 
   const { data: rows } = await db
     .from("notification_settings")
@@ -27,16 +32,23 @@ export async function GET(req: NextRequest) {
     if (!client?.active) continue;
     const tag = client.name;
 
-    // ===== Relatório semanal
-    if (s.weekly_enabled && s.weekly_day === day && s.weekly_hour === hour) {
+    // ===== Relatório semanal (janela: a hora configurada inteira; fila de até 3 por rodada de 10 min)
+    if (
+      s.weekly_enabled &&
+      s.weekly_day === day &&
+      s.weekly_hour === hour &&
+      sentThisRun < MAX_REPORTS_PER_RUN
+    ) {
       const last = s.last_weekly_sent ? new Date(s.last_weekly_sent).getTime() : 0;
       if (Date.now() - last > 6 * 86400e3) {
+        if (sentThisRun > 0) await new Promise((r) => setTimeout(r, DELAY_BETWEEN_SENDS));
         try {
           const r = await sendWeeklyReport({ ...client, group_id: s.group_id });
           if (!r.skipped) {
             await db.from("notification_settings").update({ last_weekly_sent: new Date().toISOString() }).eq("client_id", client.id);
             await db.from("notification_log").insert({ client_id: client.id, type: "weekly_report", status: "sent", detail: `Automático · ${r.period}` });
             out[tag] = "relatório enviado";
+            sentThisRun++;
           } else {
             out[tag] = `pulado: ${r.reason}`;
           }
@@ -47,8 +59,8 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ===== Saldo baixo (só pré-pago)
-    if (s.low_balance_enabled) {
+    // ===== Saldo baixo (só pré-pago; verificado uma vez por hora)
+    if (s.low_balance_enabled && firstRunOfHour) {
       try {
         const info = await getAccountInfo(client.ad_account_id);
         if (info.isPrepaid) {
@@ -72,5 +84,5 @@ export async function GET(req: NextRequest) {
       }
     }
   }
-  return NextResponse.json({ hour, day, results: out });
+  return NextResponse.json({ hour, day, minute, sentThisRun, results: out });
 }
