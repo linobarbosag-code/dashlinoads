@@ -219,11 +219,29 @@ export default function DashboardView({
     : null;
 
   // ===== calendário =====
+  const [defaultPreset, setDefaultPreset] = useState<string | null>(null);
+
+  useEffect(() => {
+    const stored = typeof window !== "undefined" ? localStorage.getItem("linoads_default_period") : null;
+    if (stored) {
+      setDefaultPreset(stored);
+      setPresetRange(stored);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function saveDefaultPreset(k: string | null) {
+    setDefaultPreset(k);
+    if (k) localStorage.setItem("linoads_default_period", k);
+    else localStorage.removeItem("linoads_default_period");
+  }
+
   function setPresetRange(k: string) {
     const t = new Date();
     let s = new Date(t);
     let e = new Date(t);
-    if (k === "7d") s.setDate(t.getDate() - 6);
+    if (k === "hoje") { /* s = e = hoje */ }
+    else if (k === "7d") s.setDate(t.getDate() - 6);
     else if (k === "14d") s.setDate(t.getDate() - 13);
     else if (k === "30d") s.setDate(t.getDate() - 29);
     else if (k === "mes") s = new Date(t.getFullYear(), t.getMonth(), 1);
@@ -273,6 +291,7 @@ export default function DashboardView({
   const ds = new Date(rangeStart + "T12:00");
   const de = new Date(rangeEnd + "T12:00");
   const dateLabel =
+    preset === "hoje" ? "Hoje" :
     preset === "mes" ? MON_LONG[ds.getMonth()] :
     preset === "mespassado" ? MON_LONG[ds.getMonth()] :
     `${ds.getDate()} ${MON_SHORT[ds.getMonth()]} – ${de.getDate()} ${MON_SHORT[de.getMonth()]}`;
@@ -498,20 +517,35 @@ export default function DashboardView({
                 <div style={{ width: 168, display: "flex", flexDirection: "column", gap: 4, borderRight: "1px solid #F0F1F6", paddingRight: 12 }}>
                   <div style={{ font: `600 10px ${BODY}`, letterSpacing: ".05em", textTransform: "uppercase", color: MUTED2, padding: "4px 8px 6px" }}>Atalhos</div>
                   {[
+                    { k: "hoje", label: "Hoje" },
                     { k: "7d", label: "Últimos 7 dias" },
                     { k: "14d", label: "Últimos 14 dias" },
                     { k: "30d", label: "Últimos 30 dias" },
                     { k: "mes", label: "Este mês" },
                     { k: "mespassado", label: "Mês passado" },
-                  ].map((p) => (
-                    <button
-                      key={p.k}
-                      onClick={() => setPresetRange(p.k)}
-                      style={{ textAlign: "left", border: "none", cursor: "pointer", background: preset === p.k ? "#1A1442" : "transparent", color: preset === p.k ? "#fff" : INK2, borderRadius: 9, padding: "10px 12px", font: `600 12px ${BODY}` }}
-                    >
-                      {p.label}
-                    </button>
-                  ))}
+                  ].map((p) => {
+                    const active = preset === p.k;
+                    const isDefault = defaultPreset === p.k;
+                    return (
+                    <div key={p.k} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <button
+                        onClick={() => setPresetRange(p.k)}
+                        style={{ flex: 1, textAlign: "left", border: "none", cursor: "pointer", background: active ? "#1A1442" : "transparent", color: active ? "#fff" : INK2, borderRadius: 9, padding: "10px 12px", font: `600 12px ${BODY}` }}
+                      >
+                        {p.label}
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); saveDefaultPreset(isDefault ? null : p.k); }}
+                        title={isDefault ? "Padrão ao abrir o app (clique para remover)" : "Definir como padrão ao abrir o app"}
+                        style={{ border: "none", cursor: "pointer", background: "transparent", padding: 4, display: "flex", alignItems: "center" }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill={isDefault ? "#F5813C" : "none"} stroke={isDefault ? "#F5813C" : "#C9CBD6"} strokeWidth="2">
+                          <path d="M12 17v5M9 3h6l1 7 2.5 2.5a1 1 0 0 1-.7 1.5H6.2a1 1 0 0 1-.7-1.5L8 10z" />
+                        </svg>
+                      </button>
+                    </div>
+                    );
+                  })}
                   <div style={{ marginTop: "auto", padding: 8, font: `500 11px/1.4 ${BODY}`, color: MUTED }}>
                     Clique em dois dias no calendário para um intervalo personalizado.
                   </div>
