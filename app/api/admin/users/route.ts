@@ -10,6 +10,37 @@ async function requireAdmin() {
   return profile?.role === "admin" ? user : null;
 }
 
+export async function PATCH(req: NextRequest) {
+  const admin = await requireAdmin();
+  if (!admin) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+
+  const { user_id, role } = await req.json();
+  if (!["admin", "client"].includes(role))
+    return NextResponse.json({ error: "Cargo inválido" }, { status: 400 });
+  if (user_id === admin.id && role !== "admin")
+    return NextResponse.json({ error: "Você não pode rebaixar o próprio acesso" }, { status: 400 });
+
+  const db = createAdminClient();
+  const { error } = await db.from("profiles").update({ role }).eq("id", user_id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(req: NextRequest) {
+  const admin = await requireAdmin();
+  if (!admin) return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+
+  const { user_id } = await req.json();
+  if (user_id === admin.id)
+    return NextResponse.json({ error: "Você não pode remover o próprio acesso" }, { status: 400 });
+
+  const db = createAdminClient();
+  const { error } = await db.auth.admin.deleteUser(user_id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  // profiles e client_users caem em cascata pelo FK de auth.users
+  return NextResponse.json({ ok: true });
+}
+
 export async function GET() {
   if (!(await requireAdmin()))
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });

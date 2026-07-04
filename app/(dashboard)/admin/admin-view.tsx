@@ -120,6 +120,44 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
     }
   }
 
+  async function setRole(u: any, role: string) {
+    const res = await fetch("/api/admin/users", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: u.id, role }),
+    });
+    const json = await res.json();
+    if (!res.ok) return flash(false, json.error);
+    flash(true, `${u.full_name} agora é ${role === "admin" ? "Admin (vê todas as contas)" : "Cliente"}.`);
+    loadUsers();
+  }
+
+  async function removeUser(u: any) {
+    if (!window.confirm(`Remover o acesso de ${u.full_name} (${u.email})? Essa ação não tem volta.`)) return;
+    const res = await fetch("/api/admin/users", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: u.id }),
+    });
+    const json = await res.json();
+    if (!res.ok) return flash(false, json.error);
+    flash(true, "Acesso removido.");
+    loadUsers();
+  }
+
+  async function removeClient(c: Client) {
+    if (!window.confirm(`Excluir a conta ${c.name} (${c.ad_account_id})?\n\nIsso remove também os vínculos de acesso, o histórico de cache e as configurações de notificação dessa conta. Essa ação não tem volta.`)) return;
+    const res = await fetch("/api/admin/clients", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: c.id }),
+    });
+    const json = await res.json();
+    if (!res.ok) return flash(false, json.error);
+    setClients((list) => list.filter((x) => x.id !== c.id));
+    flash(true, `Conta ${c.name} excluída.`);
+  }
+
   async function setObjetivo(c: Client, objetivo: string) {
     setClients((list) => list.map((x) => (x.id === c.id ? { ...x, objetivo } : x)));
     const res = await fetch("/api/admin/clients", {
@@ -279,6 +317,9 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
             <button onClick={() => toggleClient(c)} style={{ border: "1px solid #E2E4EE", cursor: "pointer", background: "#fff", borderRadius: 9, padding: "7px 12px", font: `600 11px ${BODY}`, color: INK2 }}>
               {c.active ? "Desativar" : "Reativar"}
             </button>
+            <button onClick={() => removeClient(c)} title="Excluir conta" style={{ border: "1px solid #F5C4D2", cursor: "pointer", background: "#FDF2F6", borderRadius: 9, padding: "7px 9px", display: "flex", alignItems: "center" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C21E56" strokeWidth="2"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" /></svg>
+            </button>
           </div>
         ))}
       </div>
@@ -300,9 +341,18 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
             <span style={{ font: `600 11px ${BODY}`, color: INK2 }}>
               {u.role === "admin" ? "Todas as contas" : (u.clients.join(", ") || "Sem vínculo")}
             </span>
-            <span style={{ font: `600 10px ${BODY}`, color: u.role === "admin" ? "#fff" : "#EF6D2E", background: u.role === "admin" ? NAVY : "#FDECE2", padding: "4px 10px", borderRadius: 20 }}>
-              {u.role === "admin" ? "Admin" : "Cliente"}
-            </span>
+            <select
+              value={u.role}
+              onChange={(e) => setRole(u, e.target.value)}
+              style={{ border: "1px solid #E2E4EE", borderRadius: 9, padding: "6px 8px", font: `600 11px ${BODY}`, color: u.role === "admin" ? "#fff" : INK2, background: u.role === "admin" ? NAVY : "#fff", cursor: "pointer" }}
+              title="Cargo: Admin vê todas as contas e o painel de administração"
+            >
+              <option value="client">Cliente</option>
+              <option value="admin">Admin</option>
+            </select>
+            <button onClick={() => removeUser(u)} title="Remover acesso" style={{ border: "1px solid #F5C4D2", cursor: "pointer", background: "#FDF2F6", borderRadius: 9, padding: "7px 9px", display: "flex", alignItems: "center" }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C21E56" strokeWidth="2"><path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" /></svg>
+            </button>
           </div>
         ))}
       </div>

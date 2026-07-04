@@ -49,3 +49,16 @@ export async function PATCH(req: NextRequest) {
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });
 }
+
+
+export async function DELETE(req: NextRequest) {
+  if (!(await requireAdmin()))
+    return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
+
+  const { id } = await req.json();
+  const db = createAdminClient();
+  const { error } = await db.from("clients").delete().eq("id", id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 400 });
+  // insights_cache, client_users e notification_settings caem em cascata
+  return NextResponse.json({ ok: true });
+}
