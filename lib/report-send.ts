@@ -1,11 +1,11 @@
 // lib/report-send.ts — monta os dados, gera o PDF e envia no grupo
 import {
   getInsights,
-  previousRange,
   detectObjetivo,
   extractResult,
   buildFunnel,
   RESULT_META,
+  type Objetivo,
   type Range,
 } from "@/lib/meta-v2";
 import { buildReportPdf } from "@/lib/report-pdf";
@@ -25,7 +25,7 @@ function deltaStr(cur: number, prev: number | null, invert = false) {
   const pct = ((cur - prev) / Math.abs(prev)) * 100;
   const good = invert ? pct < 0 : pct > 0;
   return {
-    text: `${pct >= 0 ? "+" : "-"}${Math.abs(pct).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% vs semana anterior`,
+    text: `${pct >= 0 ? "+" : "-"}${Math.abs(pct).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}% vs mês anterior`,
     good,
   };
 }
@@ -35,18 +35,29 @@ export async function sendWeeklyReport(client: {
   name: string;
   ad_account_id: string;
   group_id: string;
+  objetivo?: Objetivo;
 }) {
-  // Últimos 7 dias fechados (ontem para trás)
-  const end = new Date(Date.now() - 4 * 3600e3); // America/Campo_Grande (UTC-4)
-  end.setUTCDate(end.getUTCDate() - 1);
-  const start = new Date(end);
-  start.setUTCDate(start.getUTCDate() - 6);
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
-  const range: Range = { since: iso(start), until: iso(end) };
+  // Mês até a data: dia 01 até hoje (fuso America/Campo_Grande, UTC-4)
+  const now = new Date(Date.now() - 4 * 3600e3);
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const day = now.getUTCDate();
+  const pad = (n: number) => ("0" + n).slice(-2);
+  const range: Range = {
+    since: `${y}-${pad(m + 1)}-01`,
+    until: `${y}-${pad(m + 1)}-${pad(day)}`,
+  };
+  // Mesmo período do mês anterior (dia 01 até o mesmo dia, limitado ao fim do mês anterior)
+  const pm = new Date(Date.UTC(y, m - 1, 1));
+  const lastDayPrev = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const prevRange: Range = {
+    since: `${pm.getUTCFullYear()}-${pad(pm.getUTCMonth() + 1)}-01`,
+    until: `${pm.getUTCFullYear()}-${pad(pm.getUTCMonth() + 1)}-${pad(Math.min(day, lastDayPrev))}`,
+  };
 
   const [curArr, prevArr, campaigns] = await Promise.all([
     getInsights(client.ad_account_id, range, "account"),
-    getInsights(client.ad_account_id, previousRange(range), "account"),
+    getInsights(client.ad_account_id, prevRange, "account"),
     getInsights(client.ad_account_id, range, "campaign"),
   ]);
   const cur = curArr[0];
@@ -54,16 +65,17 @@ export async function sendWeeklyReport(client: {
     return { skipped: true, reason: "Sem veiculação no período" };
   }
   const prv = prevArr[0] ?? null;
-  const objetivo = detectObjetivo(cur);
+  const objetivo =
+    client.objetivo && client.objetivo !== "auto"
+      ? (client.objetivo as Exclude<Objetivo, "auto">)
+      : detectObjetivo(cur);
   const meta = RESULT_META[objetivo];
 
   const curR = extractResult(cur, objetivo);
   const prvR = prv ? extractResult(prv, objetivo) : null;
   const spend = Number(cur.spend);
 
-  const fmt = (d: Date) =>
-    `${("0" + d.getUTCDate()).slice(-2)}/${("0" + (d.getUTCMonth() + 1)).slice(-2)}`;
-  const periodLabel = `${fmt(start)} a ${fmt(end)}`;
+  const periodLabel = `01/${pad(m + 1)} a ${pad(day)}/${pad(m + 1)}`;
 
   const dSpend = deltaStr(spend, prv ? Number(prv.spend) : null);
   const dRes = deltaStr(curR.results, prvR?.results ?? null);
@@ -100,8 +112,8 @@ export async function sendWeeklyReport(client: {
   });
 
   const msg =
-    `📊 *Relatório semanal — ${client.name}*\n` +
-    `_Período: ${periodLabel}_\n\n` +
+    `📊 *Relatório do mês — ${client.name}*\n` +
+    `_Período: ${periodLabel} · comparado ao mesmo período do mês anterior_\n\n` +
     `💰 Investimento: *${fMoney(spend)}*\n` +
     `🎯 ${meta.resultKey}: *${fInt(curR.results)}*` + (dRes ? ` (${dRes.text})` : "") + `\n` +
     `📉 ${meta.custoKey}: *${curR.costPerResult ? fMoney(curR.costPerResult) : "—"}*\n\n` +

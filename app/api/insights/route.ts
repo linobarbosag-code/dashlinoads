@@ -53,7 +53,7 @@ export async function GET(req: NextRequest) {
   // RLS decide o acesso
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name, ad_account_id, currency")
+    .select("id, name, ad_account_id, currency, objetivo")
     .eq("id", clientId)
     .single();
   if (!client) {
@@ -76,12 +76,15 @@ export async function GET(req: NextRequest) {
     const cur = curArr[0] ?? null;
     const prv = prevArr[0] ?? null;
 
+    const clientDefault = (client as any).objetivo as Objetivo | undefined;
     const objetivo =
-      objetivoParam === "auto"
-        ? cur
-          ? detectObjetivo(cur)
-          : "leads"
-        : objetivoParam;
+      objetivoParam !== "auto"
+        ? objetivoParam
+        : clientDefault && clientDefault !== "auto"
+        ? (clientDefault as Exclude<Objetivo, "auto">)
+        : cur
+        ? detectObjetivo(cur)
+        : "leads";
 
     const enrich = (i: any) => ({
       ...i,

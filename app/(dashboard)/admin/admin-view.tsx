@@ -47,7 +47,17 @@ interface Client {
   name: string;
   ad_account_id: string;
   active: boolean;
+  objetivo?: string;
 }
+
+const OBJETIVOS = [
+  { key: "auto", label: "Automático" },
+  { key: "compras", label: "E-commerce" },
+  { key: "infoproduto", label: "Infoproduto" },
+  { key: "leads", label: "Leads" },
+  { key: "conversas", label: "Conversas" },
+  { key: "engajamento", label: "Engajamento" },
+];
 
 export default function AdminView({ initialClients }: { initialClients: Client[] }) {
   const [clients, setClients] = useState<Client[]>(initialClients);
@@ -108,6 +118,17 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
         list.map((x) => (x.id === c.id ? { ...x, active: !x.active } : x))
       );
     }
+  }
+
+  async function setObjetivo(c: Client, objetivo: string) {
+    setClients((list) => list.map((x) => (x.id === c.id ? { ...x, objetivo } : x)));
+    const res = await fetch("/api/admin/clients", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: c.id, objetivo }),
+    });
+    if (!res.ok) flash(false, "Falha ao salvar o objetivo");
+    else flash(true, `Objetivo de ${c.name}: ${OBJETIVOS.find((o) => o.key === objetivo)?.label}.`);
   }
 
   async function addUser() {
@@ -242,6 +263,16 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
               <div style={{ font: `600 13px ${BODY}`, color: NAVY }}>{c.name}</div>
               <div style={{ font: `500 11px ${BODY}`, color: MUTED }}>{c.ad_account_id}</div>
             </div>
+            <select
+              value={c.objetivo ?? "auto"}
+              onChange={(e) => setObjetivo(c, e.target.value)}
+              style={{ border: "1px solid #E2E4EE", borderRadius: 9, padding: "6px 8px", font: `600 11px ${BODY}`, color: INK2, background: "#fff", cursor: "pointer" }}
+              title="Objetivo padrão da conta (relatórios e dashboard)"
+            >
+              {OBJETIVOS.map((o) => (
+                <option key={o.key} value={o.key}>{o.label}</option>
+              ))}
+            </select>
             <span style={{ font: `600 10px ${BODY}`, color: c.active ? "#0E7A4E" : MUTED, background: c.active ? "#E7F6EF" : "#F0F1F6", padding: "4px 10px", borderRadius: 20 }}>
               {c.active ? "Ativa" : "Inativa"}
             </span>

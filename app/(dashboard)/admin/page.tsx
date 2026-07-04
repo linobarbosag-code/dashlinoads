@@ -18,7 +18,7 @@ export default async function AdminPage() {
 
   const { data: clients } = await supabase
     .from("clients")
-    .select("id, name, ad_account_id, active")
+    .select("id, name, ad_account_id, active, objetivo")
     .order("name");
 
   return <AdminView initialClients={clients ?? []} />;

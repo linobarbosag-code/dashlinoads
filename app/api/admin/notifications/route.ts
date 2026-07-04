@@ -62,7 +62,7 @@ export async function PUT(req: NextRequest) {
   const db = createAdminClient();
 
   const { data: client } = await db
-    .from("clients").select("id, name, ad_account_id").eq("id", client_id).single();
+    .from("clients").select("id, name, ad_account_id, objetivo").eq("id", client_id).single();
   const { data: st } = await db
     .from("notification_settings").select("group_id").eq("client_id", client_id).single();
 

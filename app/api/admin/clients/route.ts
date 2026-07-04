@@ -40,9 +40,12 @@ export async function PATCH(req: NextRequest) {
   if (!(await requireAdmin()))
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const { id, active } = await req.json();
+  const { id, active, objetivo } = await req.json();
   const db = createAdminClient();
-  const { error } = await db.from("clients").update({ active }).eq("id", id);
+  const patch: Record<string, any> = {};
+  if (active !== undefined) patch.active = active;
+  if (objetivo !== undefined) patch.objetivo = objetivo;
+  const { error } = await db.from("clients").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });
 }

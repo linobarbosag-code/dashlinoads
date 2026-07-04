@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
 
   const { data: rows } = await db
     .from("notification_settings")
-    .select("*, clients(id, name, ad_account_id, active)")
+    .select("*, clients(id, name, ad_account_id, active, objetivo)")
     .not("group_id", "is", null);
 
   const out: Record<string, string> = {};
