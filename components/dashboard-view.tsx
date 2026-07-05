@@ -613,7 +613,9 @@ export default function DashboardView({
                 <span>
                   <span style={{ display: "block", font: `600 9px ${BODY}`, color: MUTED, letterSpacing: ".04em", textTransform: "uppercase" }}>Saldo da conta</span>
                   <span style={{ display: "block", font: `700 13px ${DISPLAY}`, color: NAVY }}>
-                    {data.account_info.displayString ?? fMoney2(data.account_info.balance)}
+                    {data.account_info.available !== null && data.account_info.available !== undefined
+                      ? fMoney2(data.account_info.available)
+                      : data.account_info.displayString ?? "—"}
                   </span>
                 </span>
               </span>

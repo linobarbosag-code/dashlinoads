@@ -142,9 +142,29 @@ export async function getBreakdown(
   return json.data ?? [];
 }
 
-/** Info da conta: saldo (pré-pago), moeda, status. */
+/** Extrai o valor numérico de um display_string tipo "Saldo disponível (R$1.234,56)". */
+function parseMoneyFromDisplay(s: string | null): number | null {
+  if (!s) return null;
+  const m = s.match(/([\d][\d.,]*)/);
+  if (!m) return null;
+  let raw = m[1];
+  const lastComma = raw.lastIndexOf(",");
+  const lastDot = raw.lastIndexOf(".");
+  if (lastComma > lastDot) {
+    raw = raw.replace(/\./g, "").replace(",", "."); // pt-BR: 1.234,56
+  } else if (lastDot > lastComma) {
+    raw = raw.replace(/,/g, ""); // en: 1,234.56
+  }
+  const n = Number(raw);
+  return isFinite(n) ? n : null;
+}
+
+/** Info da conta: saldo disponível (pré-pago), moeda, status.
+ *  IMPORTANTE: o campo `balance` da Meta é o valor EM ABERTO (gasto não faturado),
+ *  não o saldo. O saldo disponível de conta pré-paga vem no display_string. */
 export async function getAccountInfo(adAccountId: string): Promise<{
-  balance: number;
+  balance: number;                 // valor em aberto (gasto não faturado)
+  available: number | null;        // saldo disponível (pré-pago), extraído do display_string
   currency: string;
   isPrepaid: boolean;
   displayString: string | null;
@@ -154,13 +174,14 @@ export async function getAccountInfo(adAccountId: string): Promise<{
     fields: "balance,currency,funding_source_details,account_status",
   });
   const fs = json.funding_source_details ?? {};
-  // type 20 = pré-pago (Meta); display_string traz o saldo formatado quando existe
-  const isPrepaid = fs.type === 20 || /saldo|balance/i.test(fs.display_string ?? "");
+  const display: string | null = fs.display_string ?? null;
+  const isPrepaid = fs.type === 20 || /saldo|balance|dispon/i.test(display ?? "");
   return {
     balance: Number(json.balance ?? 0) / 100,
+    available: isPrepaid ? parseMoneyFromDisplay(display) : null,
     currency: json.currency ?? "BRL",
     isPrepaid,
-    displayString: fs.display_string ?? null,
+    displayString: display,
     accountStatus: Number(json.account_status ?? 1),
   };
 }

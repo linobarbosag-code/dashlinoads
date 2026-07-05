@@ -59,23 +59,25 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    // ===== Saldo baixo (só pré-pago; verificado uma vez por hora)
-    if (s.low_balance_enabled && firstRunOfHour) {
+    // ===== Saldo baixo (só pré-pago; verificado 2x/dia: 10h e 15h)
+    if (s.low_balance_enabled && firstRunOfHour && (hour === 10 || hour === 15)) {
       try {
         const info = await getAccountInfo(client.ad_account_id);
-        if (info.isPrepaid) {
+        // Só alerta com leitura CONFIÁVEL do saldo disponível (display_string da Meta).
+        // info.balance é gasto em aberto, não saldo — nunca usar para alertar.
+        if (info.isPrepaid && info.available !== null) {
           const threshold = Number(s.low_balance_threshold);
-          if (info.balance > 0 && info.balance < threshold && !s.low_balance_alerted) {
+          if (info.available < threshold && !s.low_balance_alerted) {
             await sendText(
               s.group_id,
-              `⚠️ *Aviso de saldo — ${client.name}*\n\nO saldo da conta de anúncios está em *R$ ${info.balance.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*, abaixo do limite de R$ ${threshold.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.\n\nPara as campanhas não pausarem, recomendamos recarregar a conta. Qualquer dúvida estamos à disposição!\n_Equipe LinoADS_`
+              `⚠️ *Aviso de saldo — ${client.name}*\n\nO saldo disponível da conta de anúncios está em *R$ ${info.available.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}*, abaixo do limite de R$ ${threshold.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}.\n\nPara as campanhas não pausarem, recomendamos recarregar a conta. Qualquer dúvida estamos à disposição!\n_Equipe LinoADS_`
             );
             await db.from("notification_settings").update({ low_balance_alerted: true }).eq("client_id", client.id);
-            await db.from("notification_log").insert({ client_id: client.id, type: "low_balance", status: "sent", detail: `Saldo R$ ${info.balance.toFixed(2)} < R$ ${threshold.toFixed(2)}` });
+            await db.from("notification_log").insert({ client_id: client.id, type: "low_balance", status: "sent", detail: `Saldo disponível R$ ${info.available.toFixed(2)} < R$ ${threshold.toFixed(2)}` });
             out[tag] = (out[tag] ? out[tag] + " · " : "") + "alerta de saldo enviado";
           }
           // Rearma o alerta quando o saldo se recupera (20% acima do limite)
-          if (s.low_balance_alerted && info.balance > threshold * 1.2) {
+          if (s.low_balance_alerted && info.available > threshold * 1.2) {
             await db.from("notification_settings").update({ low_balance_alerted: false }).eq("client_id", client.id);
           }
         }
