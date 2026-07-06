@@ -80,7 +80,7 @@ export async function PUT(req: NextRequest) {
       if (r.skipped) {
         return NextResponse.json({ error: r.reason }, { status: 400 });
       }
-      await db.from("notification_settings").update({ last_weekly_sent: new Date().toISOString() }).eq("client_id", client_id);
+      // Envio manual NÃO arma a trava semanal: o agendado da semana continua saindo normalmente
       await db.from("notification_log").insert({ client_id, type: "weekly_report", status: "sent", detail: `Envio manual · ${r.period}` });
       return NextResponse.json({ ok: true, msg: `Relatório (${r.period}) enviado no grupo` });
     }

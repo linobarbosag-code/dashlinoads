@@ -24,7 +24,14 @@ export async function GET(req: NextRequest) {
   const { data: rows } = await db
     .from("notification_settings")
     .select("*, clients(id, name, ad_account_id, active, objetivo)")
-    .not("group_id", "is", null);
+    .not("group_id", "is", null)
+    .order("last_weekly_sent", { ascending: true, nullsFirst: true }); // nunca-enviados primeiro
+
+  const withTimeout = <T,>(p: Promise<T>, ms: number, label: string) =>
+    Promise.race<T>([
+      p,
+      new Promise<T>((_, rej) => setTimeout(() => rej(new Error(`Watchdog: ${label} passou de ${ms / 1000}s e foi abortado`)), ms)),
+    ]);
 
   const out: Record<string, string> = {};
   for (const s of rows ?? []) {
@@ -32,18 +39,28 @@ export async function GET(req: NextRequest) {
     if (!client?.active) continue;
     const tag = client.name;
 
-    // ===== Relatório semanal (janela: a hora configurada inteira; fila de até 3 por rodada de 10 min)
+    // ===== Relatório semanal
+    // Janela de recuperação: da hora configurada até +2h (se uma rodada falhar/perder, recupera no mesmo dia)
+    const inWindow = hour >= s.weekly_hour && hour <= s.weekly_hour + 2;
     if (
       s.weekly_enabled &&
       s.weekly_day === day &&
-      s.weekly_hour === hour &&
+      inWindow &&
       sentThisRun < MAX_REPORTS_PER_RUN
     ) {
       const last = s.last_weekly_sent ? new Date(s.last_weekly_sent).getTime() : 0;
+      if (Date.now() - last <= 6 * 86400e3) {
+        console.log(`[notify] pulado (já enviado nesta semana): ${tag}`);
+      }
       if (Date.now() - last > 6 * 86400e3) {
+        console.log(`[notify] enviando relatório: ${tag}`);
         if (sentThisRun > 0) await new Promise((r) => setTimeout(r, DELAY_BETWEEN_SENDS));
         try {
-          const r = await sendWeeklyReport({ ...client, group_id: s.group_id });
+          const r = await withTimeout(
+            sendWeeklyReport({ ...client, group_id: s.group_id }),
+            90000,
+            `relatório ${tag}`
+          );
           if (!r.skipped) {
             await db.from("notification_settings").update({ last_weekly_sent: new Date().toISOString() }).eq("client_id", client.id);
             await db.from("notification_log").insert({ client_id: client.id, type: "weekly_report", status: "sent", detail: `Automático · ${r.period}` });

@@ -42,12 +42,27 @@ const LEVEL_FIELDS: Record<string, string> = {
   ad: BASE_FIELDS + ",ad_id,ad_name,campaign_name",
 };
 
+const META_TIMEOUT_MS = 25000;
+
 async function metaFetch(path: string, params: Record<string, string>) {
   const url = new URL(`${META_BASE}${path}`);
   url.searchParams.set("access_token", TOKEN);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
 
-  const res = await fetch(url.toString(), { next: { revalidate: 0 } });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), META_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), { next: { revalidate: 0 }, signal: ctrl.signal });
+  } catch (e: any) {
+    throw new Error(
+      e?.name === "AbortError"
+        ? `Meta API não respondeu em ${META_TIMEOUT_MS / 1000}s (${path})`
+        : `Meta API falhou (${path}): ${e.message}`
+    );
+  } finally {
+    clearTimeout(timer);
+  }
   const json = await res.json();
   if (json.error) {
     const { code, message } = json.error;

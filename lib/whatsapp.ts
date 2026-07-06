@@ -5,11 +5,21 @@ const URL_BASE = process.env.UAZAPI_URL!;
 const TOKEN = process.env.UAZAPI_TOKEN!;
 
 async function uaz(path: string, body?: any, method = "POST") {
-  const res = await fetch(`${URL_BASE}${path}`, {
-    method,
-    headers: { token: TOKEN, "Content-Type": "application/json" },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 20000);
+  let res: Response;
+  try {
+    res = await fetch(`${URL_BASE}${path}`, {
+      method,
+      headers: { token: TOKEN, "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    });
+  } catch (e: any) {
+    throw new Error(e?.name === "AbortError" ? `uazapi não respondeu em 20s (${path})` : `uazapi falhou (${path}): ${e.message}`);
+  } finally {
+    clearTimeout(timer);
+  }
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(`uazapi ${path} [${res.status}]: ${json.error ?? json.message ?? JSON.stringify(json).slice(0, 200)}`);
