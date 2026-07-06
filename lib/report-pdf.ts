@@ -28,6 +28,18 @@ export interface ReportData {
   campaigns: { name: string; results: string; cost: string; spend: string }[];
 }
 
+/** Remove caracteres fora do WinAnsi (emojis etc.) preservando acentos do português. */
+function winAnsiSafe(s: string): string {
+  return s
+    .replace(/[\u2018\u2019\u201A]/g, "'")
+    .replace(/[\u201C\u201D\u201E]/g, '"')
+    .replace(/[\u2013\u2014]/g, "-")
+    .replace(/\u2026/g, "...")
+    .replace(/[^\u0000-\u00FF]/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
+
 const money = (n: number) =>
   "R$ " + n.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -38,7 +50,28 @@ function fit(font: PDFFont, text: string, size: number, maxWidth: number): strin
   return t + "…";
 }
 
-export async function buildReportPdf(data: ReportData): Promise<Uint8Array> {
+export async function buildReportPdf(input: ReportData): Promise<Uint8Array> {
+  // Sanitiza TODO texto antes de desenhar (nomes de campanha com emoji são comuns)
+  const data: ReportData = {
+    clientName: winAnsiSafe(input.clientName),
+    periodLabel: winAnsiSafe(input.periodLabel),
+    resultKey: winAnsiSafe(input.resultKey),
+    custoKey: winAnsiSafe(input.custoKey),
+    kpis: input.kpis.map((k) => ({
+      ...k,
+      label: winAnsiSafe(k.label),
+      value: winAnsiSafe(k.value),
+      delta: k.delta ? winAnsiSafe(k.delta) : undefined,
+    })),
+    funnel: input.funnel.map((f) => ({ ...f, stage: winAnsiSafe(f.stage), valueStr: winAnsiSafe(f.valueStr) })),
+    campaigns: input.campaigns.map((c) => ({
+      name: winAnsiSafe(c.name),
+      results: winAnsiSafe(c.results),
+      cost: winAnsiSafe(c.cost),
+      spend: winAnsiSafe(c.spend),
+    })),
+  };
+
   const doc = await PDFDocument.create();
   const page = doc.addPage([595, 842]); // A4
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
