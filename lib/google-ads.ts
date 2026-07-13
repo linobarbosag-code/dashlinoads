@@ -12,6 +12,12 @@ const CLIENT_SECRET = process.env.GOOGLE_ADS_CLIENT_SECRET;
 const REFRESH_TOKEN = process.env.GOOGLE_ADS_REFRESH_TOKEN;
 const LOGIN_CID = process.env.GOOGLE_ADS_LOGIN_CUSTOMER_ID;
 
+export async function warmupToken(): Promise<void> {
+  console.log("[gads] obtendo access token...");
+  await getAccessToken();
+  console.log("[gads] access token ok");
+}
+
 export function googleConfigured(): boolean {
   return !!(DEV_TOKEN && CLIENT_ID && CLIENT_SECRET && REFRESH_TOKEN && LOGIN_CID);
 }
@@ -47,6 +53,8 @@ async function getAccessToken(): Promise<string> {
 // ===== GAQL
 async function gaql(customerId: string, query: string): Promise<any[]> {
   const cid = customerId.replace(/\D/g, "");
+  const t0 = Date.now();
+  const from = query.match(/FROM\s+(\w+)/)?.[1] ?? "?";
   const token = await getAccessToken();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 25000);
@@ -61,16 +69,23 @@ async function gaql(customerId: string, query: string): Promise<any[]> {
           "login-customer-id": LOGIN_CID!.replace(/\D/g, ""),
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ query, pageSize: 500 }),
+        body: JSON.stringify({ query }),
         signal: ctrl.signal,
       }
     );
-    const json = await res.json();
+    const text = await res.text();
+    let json: any;
+    try {
+      json = JSON.parse(text);
+    } catch {
+      throw new Error(`Google Ads API [${res.status}]: resposta não-JSON: ${text.slice(0, 150)}`);
+    }
     if (!res.ok) {
       const detail =
         json.error?.details?.[0]?.errors?.[0]?.message ?? json.error?.message ?? JSON.stringify(json).slice(0, 200);
       throw new Error(`Google Ads API [${res.status}]: ${detail}`);
     }
+    console.log(`[gads] ${from} ok em ${Date.now() - t0}ms (${(json.results ?? []).length} linhas)`);
     return json.results ?? [];
   } catch (e: any) {
     if (e?.name === "AbortError") throw new Error("Google Ads API não respondeu em 25s");

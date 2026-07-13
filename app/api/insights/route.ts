@@ -20,7 +20,7 @@ import {
   type Range,
   type Focus,
 } from "@/lib/meta-v2";
-import { googleConfigured, gAccount, gCampaigns, gDaily, gNetworks } from "@/lib/google-ads";
+import { googleConfigured, warmupToken, gAccount, gCampaigns, gDaily, gNetworks } from "@/lib/google-ads";
 
 export const maxDuration = 60;
 
@@ -71,6 +71,8 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Este cliente não tem conta Google Ads cadastrada." }, { status: 400 });
     }
     try {
+      console.log(`[insights/google] início cid=${gcid} ${range.since}..${range.until}`);
+      await warmupToken();
       const prevG = previousRange(range);
       const [gCur, gPrv, gRows, gDay, gNets] = await Promise.all([
         gAccount(gcid, range),
@@ -79,6 +81,7 @@ export async function GET(req: NextRequest) {
         gDaily(gcid, range),
         gNetworks(gcid, range),
       ]);
+      console.log(`[insights/google] concluído cid=${gcid}`);
       const funnelG = gCur
         ? [
             { stage: "Impressões", value: Number(gCur.impressions) },
@@ -105,7 +108,8 @@ export async function GET(req: NextRequest) {
         fetched_at: new Date().toISOString(),
       });
     } catch (err: any) {
-      return NextResponse.json({ error: err.message }, { status: 502 });
+      console.error(`[insights/google] erro: ${err?.message ?? err}`);
+      return NextResponse.json({ error: String(err?.message ?? err) }, { status: 502 });
     }
   }
 
