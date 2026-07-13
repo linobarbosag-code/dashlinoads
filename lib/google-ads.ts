@@ -99,9 +99,9 @@ async function gaql(customerId: string, query: string): Promise<any[]> {
 
   for (const v of versions) {
     const r = await gaqlAt(v, cid, query, token);
-    // 404 sem JSON = versão inexistente/aposentada -> tenta a próxima
-    if (r.status === 404 && !r.json) {
-      console.log(`[gads] versão ${v} indisponível, tentando a próxima...`);
+    // 404 (HTML ou JSON "Method not found") = versão inexistente/aposentada -> tenta a próxima
+    if (r.status === 404) {
+      console.log(`[gads] versão ${v} indisponível (404), tentando a próxima...`);
       last = r;
       continue;
     }
