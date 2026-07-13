@@ -148,6 +148,7 @@ export default function DashboardView({
 
   const client = clients[clientIdx];
   const clientColor = CLIENT_COLORS[clientIdx % CLIENT_COLORS.length];
+  const canSwitch = isAdmin || clients.length > 1;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -359,8 +360,8 @@ export default function DashboardView({
           {/* Client selector */}
           <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
             <button
-              onClick={() => setOpen(open === "client" ? null : "client")}
-              style={{ display: "flex", alignItems: "center", gap: 11, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 13, padding: "9px 14px", cursor: isAdmin ? "pointer" : "default", boxShadow: "0 1px 2px rgba(20,15,50,.04)" }}
+              onClick={() => canSwitch && setOpen(open === "client" ? null : "client")}
+              style={{ display: "flex", alignItems: "center", gap: 11, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 13, padding: "9px 14px", cursor: canSwitch ? "pointer" : "default", boxShadow: "0 1px 2px rgba(20,15,50,.04)" }}
             >
               <span style={{ width: 30, height: 30, borderRadius: 8, background: clientColor, display: "flex", alignItems: "center", justifyContent: "center", font: `700 13px ${DISPLAY}`, color: "#fff" }}>
                 {client.name.charAt(0)}
@@ -369,13 +370,13 @@ export default function DashboardView({
                 <span style={{ display: "block", font: `700 14px ${DISPLAY}`, color: NAVY }}>{client.name}</span>
                 <span style={{ display: "block", font: `600 10px ${BODY}`, color: MUTED }}>{meta.resultKey}</span>
               </span>
-              {isAdmin && (
+              {canSwitch && (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={MUTED} strokeWidth="2" style={{ marginLeft: 4 }}>
                   <path d="M6 9l6 6 6-6" />
                 </svg>
               )}
             </button>
-            {open === "client" && isAdmin && (
+            {open === "client" && canSwitch && (
               <div style={{ ...dd, left: 0, width: 290 }}>
                 <div style={{ font: `600 10px ${BODY}`, letterSpacing: ".05em", textTransform: "uppercase", color: MUTED2, padding: "6px 10px 4px" }}>Escolher cliente</div>
                 {clients.map((c, i) => (
