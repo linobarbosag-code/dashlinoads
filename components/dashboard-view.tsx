@@ -152,6 +152,12 @@ export default function DashboardView({
   const clientColor = CLIENT_COLORS[clientIdx % CLIENT_COLORS.length];
   const canSwitch = isAdmin || clients.length > 1;
 
+  // Limpa a tela ao trocar de plataforma: skeleton no lugar de dados da plataforma anterior
+  useEffect(() => {
+    setData(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [platform, client.id]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
