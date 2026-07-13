@@ -17,7 +17,7 @@ export default async function DashboardPage() {
 
   const { data: clients } = await supabase
     .from("clients")
-    .select("id, name, ad_account_id, currency")
+    .select("id, name, ad_account_id, currency, google_customer_id")
     .eq("active", true)
     .order("name");
 

@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   if (!(await requireAdmin()))
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const { name, ad_account_id } = await req.json();
+  const { name, ad_account_id, google_customer_id } = await req.json();
   if (!name || !ad_account_id)
     return NextResponse.json({ error: "Nome e ID da conta são obrigatórios" }, { status: 400 });
 
@@ -24,9 +24,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "ID de conta inválido" }, { status: 400 });
 
   const db = createAdminClient();
+  const gcid = google_customer_id ? String(google_customer_id).replace(/\D/g, "") : null;
   const { data, error } = await db
     .from("clients")
-    .insert({ name: String(name).trim(), ad_account_id: normalized })
+    .insert({ name: String(name).trim(), ad_account_id: normalized, google_customer_id: gcid || null })
     .select()
     .single();
   if (error) {
@@ -40,11 +41,12 @@ export async function PATCH(req: NextRequest) {
   if (!(await requireAdmin()))
     return NextResponse.json({ error: "Sem permissão" }, { status: 403 });
 
-  const { id, active, objetivo } = await req.json();
+  const { id, active, objetivo, google_customer_id } = await req.json();
   const db = createAdminClient();
   const patch: Record<string, any> = {};
   if (active !== undefined) patch.active = active;
   if (objetivo !== undefined) patch.objetivo = objetivo;
+  if (google_customer_id !== undefined) patch.google_customer_id = google_customer_id;
   const { error } = await db.from("clients").update(patch).eq("id", id);
   if (error) return NextResponse.json({ error: error.message }, { status: 400 });
   return NextResponse.json({ ok: true });

@@ -8,6 +8,7 @@ interface Client {
   name: string;
   ad_account_id: string;
   currency: string;
+  google_customer_id?: string | null;
 }
 
 // ===== Tokens do design =====
@@ -136,6 +137,7 @@ export default function DashboardView({
   const [calM, setCalM] = useState(today.getMonth());
   const [pick, setPick] = useState<"start" | "end">("start");
   const [level, setLevel] = useState<"campaign" | "adset" | "ad">("campaign");
+  const [platform, setPlatform] = useState<"meta" | "google">("meta");
   const [focus, setFocus] = useState<{ type: "campaign" | "adset" | "ad"; ids: string[]; names: string[] } | null>(null);
   const [preview, setPreview] = useState<any>(null);
   const [filterTab, setFilterTab] = useState<"campaign" | "adset" | "ad">("campaign");
@@ -160,6 +162,7 @@ export default function DashboardView({
         until: rangeEnd,
         objetivo,
         level,
+        platform,
       });
       if (focus) {
         q.set("focus_type", focus.type);
@@ -174,7 +177,7 @@ export default function DashboardView({
     } finally {
       setLoading(false);
     }
-  }, [client.id, rangeStart, rangeEnd, objetivo, level, focus]);
+  }, [client.id, rangeStart, rangeEnd, objetivo, level, focus, platform]);
 
   useEffect(() => {
     load();
@@ -328,8 +331,8 @@ export default function DashboardView({
       return seg;
     });
 
-  const platTotal = (data?.platform ?? []).reduce((a: number, p: any) => a + p.spend, 0);
-  const platBars = (data?.platform ?? [])
+  const platTotal = (data?.platform_breakdown ?? []).reduce((a: number, p: any) => a + p.spend, 0);
+  const platBars = (data?.platform_breakdown ?? [])
     .filter((p: any) => p.spend > 0)
     .sort((a: any, b: any) => b.spend - a.spend)
     .map((p: any, i: number) => ({
@@ -382,7 +385,7 @@ export default function DashboardView({
                 {clients.map((c, i) => (
                   <button
                     key={c.id}
-                    onClick={() => { setClientIdx(i); setFocus(null); setEntities({}); setOpen(null); }}
+                    onClick={() => { setClientIdx(i); setFocus(null); setEntities({}); setPlatform("meta"); setOpen(null); }}
                     style={{ display: "flex", alignItems: "center", gap: 11, width: "100%", border: "none", cursor: "pointer", background: i === clientIdx ? "#F5F6FA" : "transparent", borderRadius: 10, padding: "9px 10px", textAlign: "left" }}
                   >
                     <span style={{ width: 28, height: 28, borderRadius: 8, background: CLIENT_COLORS[i % CLIENT_COLORS.length], display: "flex", alignItems: "center", justifyContent: "center", font: `700 12px ${DISPLAY}`, color: "#fff", flexShrink: 0 }}>
@@ -400,7 +403,8 @@ export default function DashboardView({
             )}
           </div>
 
-          {/* Objetivo */}
+          {/* Objetivo (só Meta) */}
+          {platform === "meta" && (
           <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => setOpen(open === "obj" ? null : "obj")}
@@ -431,7 +435,10 @@ export default function DashboardView({
             )}
           </div>
 
-          {/* Filtro global: campanha / conjunto / anúncio */}
+          )}
+
+          {/* Filtro global: campanha / conjunto / anúncio (só Meta) */}
+          {platform === "meta" && (
           <div style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
             <button
               onClick={() => setOpen(open === "filter" ? null : "filter")}
@@ -501,6 +508,8 @@ export default function DashboardView({
               </div>
             )}
           </div>
+
+          )}
 
           {/* Calendário */}
           <div style={{ position: "relative", marginLeft: "auto" }} onClick={(e) => e.stopPropagation()}>
@@ -600,10 +609,22 @@ export default function DashboardView({
         {/* ===== Selo Meta Ads (tabs de plataforma removidas: Google entra depois) ===== */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
           <div style={{ display: "inline-flex", background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 14, padding: 4, boxShadow: "0 1px 2px rgba(20,15,50,.04)" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px", borderRadius: 11, font: `700 13px ${DISPLAY}`, background: NAVY, color: "#fff" }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: error ? "#E8336E" : "#4FBF8B" }} />
+            <button
+              onClick={() => setPlatform("meta")}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px", borderRadius: 11, font: `700 13px ${DISPLAY}`, border: "none", cursor: "pointer", background: platform === "meta" ? NAVY : "transparent", color: platform === "meta" ? "#fff" : MUTED }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: "50%", background: platform === "meta" ? (error ? "#E8336E" : "#4FBF8B") : "#C9CBD6" }} />
               Meta Ads
-            </span>
+            </button>
+            {client.google_customer_id && (
+              <button
+                onClick={() => { setPlatform("google"); setFocus(null); setLevel("campaign"); }}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 20px", borderRadius: 11, font: `700 13px ${DISPLAY}`, border: "none", cursor: "pointer", background: platform === "google" ? NAVY : "transparent", color: platform === "google" ? "#fff" : MUTED }}
+              >
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: platform === "google" ? (error ? "#E8336E" : "#4FBF8B") : "#C9CBD6" }} />
+                Google Ads
+              </button>
+            )}
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             {data?.account_info?.isPrepaid && (
@@ -622,7 +643,7 @@ export default function DashboardView({
               </span>
             )}
             <div style={{ font: `500 12px ${BODY}`, color: MUTED }}>
-              {client.name} · Meta Ads{focusLabel ? ` · ${focusLabel}` : ""} · {dateLabel}
+              {client.name} · {platform === "google" ? "Google Ads" : "Meta Ads"}{focusLabel ? ` · ${focusLabel}` : ""} · {dateLabel}
             </div>
           </div>
         </div>
@@ -715,7 +736,7 @@ export default function DashboardView({
                 </span>
                 <div>
                   <div style={{ font: `700 16px ${DISPLAY}`, color: NAVY }}>Funil de conversão</div>
-                  <div style={{ font: `500 11px ${BODY}`, color: MUTED }}>eventos reais do pixel · Meta Ads</div>
+                  <div style={{ font: `500 11px ${BODY}`, color: MUTED }}>{platform === "google" ? "métricas da conta · Google Ads" : "eventos reais do pixel · Meta Ads"}</div>
                 </div>
               </div>
               <span style={{ font: `700 11px ${DISPLAY}`, color: "#EF6D2E", background: "#FDEEE1", padding: "6px 13px", borderRadius: 20 }}>
@@ -757,7 +778,8 @@ export default function DashboardView({
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            {/* Donut gênero */}
+            {/* Donut gênero (só Meta) */}
+            {platform === "meta" && (
             <div style={{ ...CARD, padding: "20px 22px" }}>
               <div style={{ font: `700 15px ${DISPLAY}`, color: NAVY, marginBottom: 4 }}>Investimento por gênero</div>
               <div style={{ font: `500 11px ${BODY}`, color: MUTED }}>distribuição do valor gasto</div>
@@ -788,13 +810,14 @@ export default function DashboardView({
                 </div>
               </div>
             </div>
-            {/* Barras por plataforma */}
+            )}
+            {/* Barras por plataforma/rede */}
             <div style={{ ...CARD, padding: "20px 22px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 14 }}>
                 <span style={{ width: 30, height: 30, borderRadius: 8, background: "linear-gradient(135deg,#E8336E,#F5813C)", display: "flex", alignItems: "center", justifyContent: "center" }}>
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><rect x="3" y="5" width="18" height="14" rx="3" /><path d="M10 9l5 3-5 3z" fill="#fff" stroke="none" /></svg>
                 </span>
-                <span style={{ font: `700 15px ${DISPLAY}`, color: NAVY }}>Onde seu anúncio aparece</span>
+                <span style={{ font: `700 15px ${DISPLAY}`, color: NAVY }}>{platform === "google" ? "Investimento por rede" : "Onde seu anúncio aparece"}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                 {platBars.map((b: any, i: number) => (
@@ -822,11 +845,14 @@ export default function DashboardView({
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
               <div style={{ font: `700 15px ${DISPLAY}`, color: NAVY }}>Visão geral</div>
               <div style={{ display: "inline-flex", background: "#F4F5F9", borderRadius: 10, padding: 3, gap: 2 }}>
-                {[
-                  { k: "campaign", label: "Campanhas" },
-                  { k: "adset", label: "Conjuntos" },
-                  { k: "ad", label: "Anúncios" },
-                ].map((l) => (
+                {(platform === "google"
+                  ? [{ k: "campaign", label: "Campanhas" }]
+                  : [
+                      { k: "campaign", label: "Campanhas" },
+                      { k: "adset", label: "Conjuntos" },
+                      { k: "ad", label: "Anúncios" },
+                    ]
+                ).map((l) => (
                   <button
                     key={l.k}
                     onClick={() => setLevel(l.k as any)}
@@ -875,6 +901,7 @@ export default function DashboardView({
             )}
           </div>
 
+          {platform === "meta" && (
           <div style={{ ...CARD, padding: "20px 22px" }}>
             <div style={{ font: `700 15px ${DISPLAY}`, color: NAVY, marginBottom: 3 }}>Destaques</div>
             <div style={{ font: `500 11px ${BODY}`, color: MUTED, marginBottom: 14 }}>criativos com mais resultados no período</div>
@@ -908,6 +935,7 @@ export default function DashboardView({
               )}
             </div>
           </div>
+          )}
         </div>
 
         {preview && (

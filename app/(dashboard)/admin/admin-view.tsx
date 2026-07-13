@@ -48,6 +48,7 @@ interface Client {
   ad_account_id: string;
   active: boolean;
   objetivo?: string;
+  google_customer_id?: string | null;
 }
 
 const OBJETIVOS = [
@@ -67,6 +68,7 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
   // form conta
   const [cName, setCName] = useState("");
   const [cAcct, setCAcct] = useState("");
+  const [cGoogle, setCGoogle] = useState("");
   const [savingClient, setSavingClient] = useState(false);
 
   // form usuário
@@ -96,7 +98,7 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
     const res = await fetch("/api/admin/clients", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: cName, ad_account_id: cAcct }),
+      body: JSON.stringify({ name: cName, ad_account_id: cAcct, google_customer_id: cGoogle }),
     });
     const json = await res.json();
     setSavingClient(false);
@@ -104,6 +106,7 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
     setClients((c) => [...c, json.client]);
     setCName("");
     setCAcct("");
+    setCGoogle("");
     flash(true, `Conta ${json.client.name} cadastrada.`);
   }
 
@@ -156,6 +159,21 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
     if (!res.ok) return flash(false, json.error);
     setClients((list) => list.filter((x) => x.id !== c.id));
     flash(true, `Conta ${c.name} excluída.`);
+  }
+
+  async function editGoogle(c: Client) {
+    const atual = c.google_customer_id ?? "";
+    const valor = window.prompt(`ID da conta Google Ads de ${c.name} (vazio para remover):`, atual);
+    if (valor === null) return;
+    const google_customer_id = valor.replace(/\D/g, "") || null;
+    const res = await fetch("/api/admin/clients", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: c.id, google_customer_id }),
+    });
+    if (!res.ok) return flash(false, "Falha ao salvar a conta Google");
+    setClients((list) => list.map((x) => (x.id === c.id ? { ...x, google_customer_id } : x)));
+    flash(true, google_customer_id ? `Google Ads vinculado à ${c.name}.` : `Google Ads removido de ${c.name}.`);
   }
 
   async function setObjetivo(c: Client, objetivo: string) {
@@ -226,8 +244,10 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
           </div>
           <label style={label}>Nome do cliente</label>
           <input style={{ ...input, marginBottom: 12 }} value={cName} onChange={(e) => setCName(e.target.value)} placeholder="Ex.: Autobel" />
-          <label style={label}>ID da conta de anúncio</label>
-          <input style={{ ...input, marginBottom: 16 }} value={cAcct} onChange={(e) => setCAcct(e.target.value)} placeholder="act_1234567890 ou só os números" />
+          <label style={label}>ID da conta de anúncio (Meta)</label>
+          <input style={{ ...input, marginBottom: 12 }} value={cAcct} onChange={(e) => setCAcct(e.target.value)} placeholder="act_1234567890 ou só os números" />
+          <label style={label}>ID da conta Google Ads (opcional)</label>
+          <input style={{ ...input, marginBottom: 16 }} value={cGoogle} onChange={(e) => setCGoogle(e.target.value)} placeholder="XXX-XXX-XXXX ou só os números" />
           <button style={{ ...primaryBtn, opacity: savingClient ? 0.6 : 1 }} disabled={savingClient} onClick={addClient}>
             {savingClient ? "Cadastrando..." : "Cadastrar conta"}
           </button>
@@ -299,8 +319,14 @@ export default function AdminView({ initialClients }: { initialClients: Client[]
             </span>
             <div style={{ flex: 1 }}>
               <div style={{ font: `600 13px ${BODY}`, color: NAVY }}>{c.name}</div>
-              <div style={{ font: `500 11px ${BODY}`, color: MUTED }}>{c.ad_account_id}</div>
+              <div style={{ font: `500 11px ${BODY}`, color: MUTED }}>
+                {c.ad_account_id}
+                {c.google_customer_id ? ` · G: ${c.google_customer_id}` : ""}
+              </div>
             </div>
+            <button onClick={() => editGoogle(c)} title="Vincular/editar conta Google Ads" style={{ border: "1px solid #E2E4EE", cursor: "pointer", background: "#fff", borderRadius: 9, padding: "7px 10px", font: `700 11px ${BODY}`, color: c.google_customer_id ? "#12A66A" : "#9096AA" }}>
+              G
+            </button>
             <select
               value={c.objetivo ?? "auto"}
               onChange={(e) => setObjetivo(c, e.target.value)}

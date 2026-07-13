@@ -20,6 +20,7 @@ import {
   type Range,
   type Focus,
 } from "@/lib/meta-v2";
+import { googleConfigured, gAccount, gCampaigns, gDaily, gNetworks } from "@/lib/google-ads";
 
 export const maxDuration = 60;
 
@@ -53,11 +54,59 @@ export async function GET(req: NextRequest) {
   // RLS decide o acesso
   const { data: client } = await supabase
     .from("clients")
-    .select("id, name, ad_account_id, currency, objetivo")
+    .select("id, name, ad_account_id, currency, objetivo, google_customer_id")
     .eq("id", clientId)
     .single();
   if (!client) {
     return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
+  }
+
+  // ===== Google Ads =====
+  if (sp.get("platform") === "google") {
+    if (!googleConfigured()) {
+      return NextResponse.json({ error: "Google Ads ainda não configurado: adicione as variáveis GOOGLE_ADS_* na Vercel." }, { status: 400 });
+    }
+    const gcid = (client as any).google_customer_id;
+    if (!gcid) {
+      return NextResponse.json({ error: "Este cliente não tem conta Google Ads cadastrada." }, { status: 400 });
+    }
+    try {
+      const prevG = previousRange(range);
+      const [gCur, gPrv, gRows, gDay, gNets] = await Promise.all([
+        gAccount(gcid, range),
+        gAccount(gcid, prevG),
+        gCampaigns(gcid, range),
+        gDaily(gcid, range),
+        gNetworks(gcid, range),
+      ]);
+      const funnelG = gCur
+        ? [
+            { stage: "Impressões", value: Number(gCur.impressions) },
+            { stage: "Cliques", value: Number(gCur.clicks) },
+            { stage: "Conversões", value: gCur.results },
+          ].filter((f) => f.value > 0)
+        : [];
+      return NextResponse.json({
+        platform: "google",
+        client: { name: client.name, currency: client.currency },
+        objetivo: "conversoes",
+        meta: { resultKey: "Conversões", custoKey: "Custo por conversão", custoShort: "Custo/conv." },
+        account: gCur,
+        previous: gPrv,
+        funnel: funnelG,
+        highlights: [],
+        rows: gRows,
+        level: "campaign",
+        focus: null,
+        account_info: null,
+        daily: gDay,
+        gender: [],
+        platform_breakdown: gNets,
+        fetched_at: new Date().toISOString(),
+      });
+    } catch (err: any) {
+      return NextResponse.json({ error: err.message }, { status: 502 });
+    }
   }
 
   try {
@@ -133,7 +182,8 @@ export async function GET(req: NextRequest) {
         spend: Number(g.spend || 0),
         results: extractResult(g, objetivo).results,
       })),
-      platform: platform.map((p: any) => ({
+      platform: "meta",
+      platform_breakdown: platform.map((p: any) => ({
         platform: p.publisher_platform,
         spend: Number(p.spend || 0),
         results: extractResult(p, objetivo).results,
