@@ -5,7 +5,12 @@
 
 import type { Range } from "@/lib/meta-v2";
 
-const VERSION = process.env.GOOGLE_ADS_API_VERSION ?? "v19";
+// O Google aposenta versões a cada ~12 meses (v19 morreu em fev/2026; cadência mensal desde 2026).
+// Tentamos da mais nova para a mais antiga e memorizamos a que responder.
+const VERSION_CANDIDATES = process.env.GOOGLE_ADS_API_VERSION
+  ? [process.env.GOOGLE_ADS_API_VERSION]
+  : ["v26", "v25", "v24", "v23", "v22", "v21", "v20"];
+let workingVersion: string | null = null;
 const DEV_TOKEN = process.env.GOOGLE_ADS_DEVELOPER_TOKEN;
 const CLIENT_ID = process.env.GOOGLE_ADS_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_ADS_CLIENT_SECRET;
@@ -51,16 +56,12 @@ async function getAccessToken(): Promise<string> {
 }
 
 // ===== GAQL
-async function gaql(customerId: string, query: string): Promise<any[]> {
-  const cid = customerId.replace(/\D/g, "");
-  const t0 = Date.now();
-  const from = query.match(/FROM\s+(\w+)/)?.[1] ?? "?";
-  const token = await getAccessToken();
+async function gaqlAt(version: string, cid: string, query: string, token: string) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 25000);
   try {
     const res = await fetch(
-      `https://googleads.googleapis.com/${VERSION}/customers/${cid}/googleAds:search`,
+      `https://googleads.googleapis.com/${version}/customers/${cid}/googleAds:search`,
       {
         method: "POST",
         headers: {
@@ -74,25 +75,53 @@ async function gaql(customerId: string, query: string): Promise<any[]> {
       }
     );
     const text = await res.text();
-    let json: any;
+    let json: any = null;
     try {
       json = JSON.parse(text);
-    } catch {
-      throw new Error(`Google Ads API [${res.status}]: resposta não-JSON: ${text.slice(0, 150)}`);
-    }
-    if (!res.ok) {
-      const detail =
-        json.error?.details?.[0]?.errors?.[0]?.message ?? json.error?.message ?? JSON.stringify(json).slice(0, 200);
-      throw new Error(`Google Ads API [${res.status}]: ${detail}`);
-    }
-    console.log(`[gads] ${from} ok em ${Date.now() - t0}ms (${(json.results ?? []).length} linhas)`);
-    return json.results ?? [];
+    } catch {}
+    return { status: res.status, ok: res.ok, json, text };
   } catch (e: any) {
     if (e?.name === "AbortError") throw new Error("Google Ads API não respondeu em 25s");
     throw e;
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function gaql(customerId: string, query: string): Promise<any[]> {
+  const cid = customerId.replace(/\D/g, "");
+  const t0 = Date.now();
+  const from = query.match(/FROM\s+(\w+)/)?.[1] ?? "?";
+  const token = await getAccessToken();
+
+  const versions = workingVersion ? [workingVersion] : VERSION_CANDIDATES;
+  let last: { status: number; json: any; text: string } | null = null;
+
+  for (const v of versions) {
+    const r = await gaqlAt(v, cid, query, token);
+    // 404 sem JSON = versão inexistente/aposentada -> tenta a próxima
+    if (r.status === 404 && !r.json) {
+      console.log(`[gads] versão ${v} indisponível, tentando a próxima...`);
+      last = r;
+      continue;
+    }
+    if (!r.ok) {
+      const detail =
+        r.json?.error?.details?.[0]?.errors?.[0]?.message ??
+        r.json?.error?.message ??
+        (r.json ? JSON.stringify(r.json).slice(0, 200) : r.text.slice(0, 150));
+      throw new Error(`Google Ads API [${r.status}]: ${detail}`);
+    }
+    if (!workingVersion) {
+      workingVersion = v;
+      console.log(`[gads] versão ativa: ${v}`);
+    }
+    console.log(`[gads] ${from} ok em ${Date.now() - t0}ms (${(r.json.results ?? []).length} linhas)`);
+    return r.json.results ?? [];
+  }
+  throw new Error(
+    `Google Ads API: nenhuma versão candidata respondeu (última: ${last?.status}). Defina GOOGLE_ADS_API_VERSION na Vercel.`
+  );
 }
 
 // ===== Normalização para o formato do dashboard
