@@ -138,6 +138,7 @@ export default function DashboardView({
   const [pick, setPick] = useState<"start" | "end">("start");
   const [level, setLevel] = useState<"campaign" | "adset" | "ad">("campaign");
   const [platform, setPlatform] = useState<"meta" | "google">("meta");
+  const [kwTab, setKwTab] = useState<"keywords" | "search_terms">("keywords");
   const [focus, setFocus] = useState<{ type: "campaign" | "adset" | "ad"; ids: string[]; names: string[] } | null>(null);
   const [preview, setPreview] = useState<any>(null);
   const [filterTab, setFilterTab] = useState<"campaign" | "adset" | "ad">("campaign");
@@ -943,6 +944,77 @@ export default function DashboardView({
           </div>
           )}
         </div>
+
+        {platform === "google" && (
+          <div style={{ ...CARD, padding: "20px 22px", marginTop: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
+              <div>
+                <div style={{ font: `700 15px ${DISPLAY}`, color: NAVY }}>Palavras-chave</div>
+                <div style={{ font: `500 11px ${BODY}`, color: MUTED, marginTop: 2 }}>
+                  {kwTab === "keywords"
+                    ? "termos que você está comprando nas campanhas"
+                    : "o que as pessoas realmente pesquisaram no Google"}
+                </div>
+              </div>
+              <div style={{ display: "inline-flex", background: "#F4F5F9", borderRadius: 10, padding: 3, gap: 2 }}>
+                {[
+                  { k: "keywords", label: "Compradas" },
+                  { k: "search_terms", label: "Termos de busca" },
+                ].map((t) => (
+                  <button
+                    key={t.k}
+                    onClick={() => setKwTab(t.k as any)}
+                    style={{ border: "none", cursor: "pointer", padding: "7px 14px", borderRadius: 8, font: `600 12px ${BODY}`, background: kwTab === t.k ? "#fff" : "transparent", color: kwTab === t.k ? NAVY : MUTED, boxShadow: kwTab === t.k ? "0 1px 2px rgba(20,15,50,.08)" : "none" }}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {(() => {
+              const list = kwTab === "keywords" ? (data?.keywords ?? []) : (data?.search_terms ?? []);
+              const isKw = kwTab === "keywords";
+              const cols = isKw
+                ? "2fr 0.8fr 1fr 0.7fr 0.9fr 0.9fr 1fr"
+                : "2fr 1fr 1fr 0.7fr 0.9fr 0.9fr 1fr";
+              const headers = isKw
+                ? ["Palavra-chave", "Corresp.", meta.resultKey, "Cliques", "CTR", "CPC médio", "Investido"]
+                : ["Termo pesquisado", "Situação", meta.resultKey, "Cliques", "CTR", "CPC médio", "Investido"];
+              return (
+                <div className="table-wrap">
+                  <div className="kw-grid" style={{ display: "grid", gridTemplateColumns: cols, padding: "8px 12px", borderBottom: "1px solid #F0F1F6", gap: 8 }}>
+                    {headers.map((h, i) => (
+                      <span key={i} style={{ font: `600 10px ${BODY}`, letterSpacing: ".04em", textTransform: "uppercase", color: MUTED2, textAlign: i === 0 || i === 1 ? "left" : "right" }}>{h}</span>
+                    ))}
+                  </div>
+                  {list.map((k: any, i: number) => (
+                    <div key={i} className="kw-grid" style={{ display: "grid", gridTemplateColumns: cols, alignItems: "center", padding: "11px 12px", borderRadius: 10, gap: 8, background: i % 2 ? "#FAFBFD" : "transparent" }}>
+                      <span style={{ font: `600 12px ${BODY}`, color: NAVY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={k.text}>{k.text}</span>
+                      <span style={{ textAlign: "left" }}>
+                        {isKw ? (
+                          <span style={{ font: `600 10px ${BODY}`, color: INK2, background: "#F0F1F6", padding: "3px 8px", borderRadius: 20 }}>{k.matchType}</span>
+                        ) : (
+                          <span style={{ font: `600 10px ${BODY}`, color: k.status === "Negativado" ? "#C21E56" : k.status === "Adicionado" ? "#0E7A4E" : MUTED, background: k.status === "Negativado" ? "#FDECF2" : k.status === "Adicionado" ? "#E7F6EF" : "#F0F1F6", padding: "3px 8px", borderRadius: 20 }}>{k.status}</span>
+                        )}
+                      </span>
+                      <span style={{ font: `700 13px ${DISPLAY}`, color: k.results > 0 ? "#0E7A4E" : NAVY, textAlign: "right" }}>{fInt(k.results)}</span>
+                      <span style={{ font: `600 12px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{fInt(k.clicks)}</span>
+                      <span style={{ font: `600 12px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{fPct(k.ctr)}</span>
+                      <span style={{ font: `600 12px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{fMoney2(k.cpc)}</span>
+                      <span style={{ font: `700 13px ${DISPLAY}`, color: NAVY, textAlign: "right" }}>{fMoney2(k.spend)}</span>
+                    </div>
+                  ))}
+                  {!list.length && !loading && (
+                    <div style={{ font: `500 13px ${BODY}`, color: MUTED, padding: 20, textAlign: "center" }}>
+                      {isKw ? "Sem palavras-chave com veiculação no período (campanhas de Pesquisa apenas)." : "Sem termos de busca no período."}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        )}
 
         {preview && (
           <div

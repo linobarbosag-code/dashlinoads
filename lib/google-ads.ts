@@ -224,3 +224,82 @@ export async function gNetworks(customerId: string, range: Range) {
     results: Math.round(v.results),
   }));
 }
+
+
+const MATCH_LABEL: Record<string, string> = {
+  EXACT: "Exata",
+  PHRASE: "Frase",
+  BROAD: "Ampla",
+  UNKNOWN: "—",
+  UNSPECIFIED: "—",
+};
+
+/** Palavras-chave compradas (keyword view) com métricas no período. */
+export async function gKeywords(customerId: string, range: Range) {
+  const rows = await gaql(
+    customerId,
+    `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type,
+            ad_group_criterion.status, campaign.name,
+            metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.ctr,
+            metrics.average_cpc, metrics.conversions, metrics.conversions_value
+     FROM keyword_view
+     WHERE ${between(range)} AND metrics.impressions > 0
+     ORDER BY metrics.cost_micros DESC LIMIT 200`
+  );
+  return rows.map((r: any) => {
+    const m = r.metrics ?? {};
+    const k = r.adGroupCriterion?.keyword ?? {};
+    const spend = Number(m.costMicros ?? 0) / 1e6;
+    const conv = Number(m.conversions ?? 0);
+    return {
+      text: k.text ?? "",
+      matchType: MATCH_LABEL[k.matchType ?? "UNKNOWN"] ?? "—",
+      status: r.adGroupCriterion?.status ?? "",
+      campaign: r.campaign?.name ?? "",
+      spend,
+      impressions: Number(m.impressions ?? 0),
+      clicks: Number(m.clicks ?? 0),
+      ctr: Number(m.ctr ?? 0) * 100,
+      cpc: Number(m.averageCpc ?? 0) / 1e6,
+      results: Math.round(conv),
+      costPerResult: conv > 0 ? spend / conv : null,
+    };
+  });
+}
+
+/** Termos de busca reais (o que o usuário digitou) com métricas no período. */
+export async function gSearchTerms(customerId: string, range: Range) {
+  const rows = await gaql(
+    customerId,
+    `SELECT search_term_view.search_term, search_term_view.status, campaign.name,
+            metrics.cost_micros, metrics.impressions, metrics.clicks, metrics.ctr,
+            metrics.average_cpc, metrics.conversions
+     FROM search_term_view
+     WHERE ${between(range)} AND metrics.impressions > 0
+     ORDER BY metrics.cost_micros DESC LIMIT 200`
+  );
+  const STATUS_LABEL: Record<string, string> = {
+    ADDED: "Adicionado",
+    EXCLUDED: "Negativado",
+    ADDED_EXCLUDED: "Adic. e negativado",
+    NONE: "Não adicionado",
+    UNKNOWN: "—",
+  };
+  return rows.map((r: any) => {
+    const m = r.metrics ?? {};
+    const spend = Number(m.costMicros ?? 0) / 1e6;
+    const conv = Number(m.conversions ?? 0);
+    return {
+      text: r.searchTermView?.searchTerm ?? "",
+      status: STATUS_LABEL[r.searchTermView?.status ?? "UNKNOWN"] ?? "—",
+      campaign: r.campaign?.name ?? "",
+      spend,
+      impressions: Number(m.impressions ?? 0),
+      clicks: Number(m.clicks ?? 0),
+      ctr: Number(m.ctr ?? 0) * 100,
+      cpc: Number(m.averageCpc ?? 0) / 1e6,
+      results: Math.round(conv),
+      costPerResult: conv > 0 ? spend / conv : null,
+    };
+  });
+}

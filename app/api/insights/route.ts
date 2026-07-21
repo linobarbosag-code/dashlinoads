@@ -20,7 +20,7 @@ import {
   type Range,
   type Focus,
 } from "@/lib/meta-v2";
-import { googleConfigured, warmupToken, gAccount, gCampaigns, gDaily, gNetworks } from "@/lib/google-ads";
+import { googleConfigured, warmupToken, gAccount, gCampaigns, gDaily, gNetworks, gKeywords, gSearchTerms } from "@/lib/google-ads";
 
 export const maxDuration = 60;
 
@@ -74,12 +74,14 @@ export async function GET(req: NextRequest) {
       console.log(`[insights/google] início cid=${gcid} ${range.since}..${range.until}`);
       await warmupToken();
       const prevG = previousRange(range);
-      const [gCur, gPrv, gRows, gDay, gNets] = await Promise.all([
+      const [gCur, gPrv, gRows, gDay, gNets, gKw, gSt] = await Promise.all([
         gAccount(gcid, range),
         gAccount(gcid, prevG),
         gCampaigns(gcid, range),
         gDaily(gcid, range),
         gNetworks(gcid, range),
+        gKeywords(gcid, range).catch(() => []),
+        gSearchTerms(gcid, range).catch(() => []),
       ]);
       console.log(`[insights/google] concluído cid=${gcid}`);
       const funnelG = gCur
@@ -99,6 +101,8 @@ export async function GET(req: NextRequest) {
         funnel: funnelG,
         highlights: [],
         rows: gRows,
+        keywords: gKw,
+        search_terms: gSt,
         level: "campaign",
         focus: null,
         account_info: null,

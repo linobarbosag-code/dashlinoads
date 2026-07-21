@@ -57,3 +57,7 @@ body {
   .table-wrap { overflow-x: auto; }
   .table-grid { min-width: 560px; }
 }
+
+@media (max-width: 720px) {
+  .kw-grid { min-width: 640px; }
+}
