@@ -1,7 +1,7 @@
 // components/login-form.tsx — visual do design LinoADS v2
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createBrowserClient } from "@supabase/ssr";
 
@@ -20,6 +20,16 @@ export default function LoginForm() {
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
   );
+
+  // Se já existe sessão válida, segue para o dashboard (checagem única, no cliente)
+  useEffect(() => {
+    let cancel = false;
+    supabase.auth.getUser().then(({ data }) => {
+      if (!cancel && data.user) router.replace("/dashboard");
+    }).catch(() => {});
+    return () => { cancel = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleLogin() {
     setLoading(true);

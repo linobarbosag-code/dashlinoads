@@ -177,6 +177,10 @@ export default function DashboardView({
       }
       const res = await fetch(`/api/insights?${q}`);
       const json = await res.json();
+      if (res.status === 401) {
+        window.location.href = "/login";
+        return;
+      }
       if (!res.ok) throw new Error(json.error);
       setData(json);
     } catch (err: any) {
