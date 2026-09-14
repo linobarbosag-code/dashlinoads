@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
 
     // ===== Relatório semanal
     // Janela de recuperação: da hora configurada até +2h (se uma rodada falhar/perder, recupera no mesmo dia)
-    const inWindow = hour >= s.weekly_hour && hour <= s.weekly_hour + 2;
+    const inWindow = hour >= s.weekly_hour && hour <= s.weekly_hour + 1;
     if (
       s.weekly_enabled &&
       s.weekly_day === day &&
@@ -55,6 +55,21 @@ export async function GET(req: NextRequest) {
       if (Date.now() - last > 6 * 86400e3) {
         console.log(`[notify] enviando relatório: ${tag}`);
         if (sentThisRun > 0) await new Promise((r) => setTimeout(r, DELAY_BETWEEN_SENDS));
+
+        // TRAVA ANTES DO ENVIO: grava a marca primeiro e só então dispara.
+        // Se o envio falhar ou o watchdog cortar, NÃO reenviamos automaticamente —
+        // para mensagem de cliente, perder um relatório é muito melhor que duplicar.
+        const { error: lockErr } = await db
+          .from("notification_settings")
+          .update({ last_weekly_sent: new Date().toISOString() })
+          .eq("client_id", client.id)
+          .eq("last_weekly_sent", s.last_weekly_sent); // só grava se ninguém marcou antes
+        if (lockErr) {
+          console.log(`[notify] não consegui travar ${tag}, pulando: ${lockErr.message}`);
+          continue;
+        }
+        sentThisRun++;
+
         try {
           const r = await withTimeout(
             sendWeeklyReport({ ...client, group_id: s.group_id }),
@@ -62,15 +77,22 @@ export async function GET(req: NextRequest) {
             `relatório ${tag}`
           );
           if (!r.skipped) {
-            await db.from("notification_settings").update({ last_weekly_sent: new Date().toISOString() }).eq("client_id", client.id);
             await db.from("notification_log").insert({ client_id: client.id, type: "weekly_report", status: "sent", detail: `Automático · ${r.period}` });
             out[tag] = "relatório enviado";
-            sentThisRun++;
           } else {
+            // Sem veiculação: libera a marca para tentar de novo na próxima semana normalmente
+            await db.from("notification_settings").update({ last_weekly_sent: s.last_weekly_sent }).eq("client_id", client.id);
             out[tag] = `pulado: ${r.reason}`;
           }
         } catch (e: any) {
-          await db.from("notification_log").insert({ client_id: client.id, type: "weekly_report", status: "error", detail: e.message });
+          // A marca fica gravada de propósito: não reenviamos automaticamente após falha.
+          // Use "Enviar agora" em /notificacoes para reenviar sob controle.
+          await db.from("notification_log").insert({
+            client_id: client.id,
+            type: "weekly_report",
+            status: "error",
+            detail: `${e.message} — sem reenvio automático; use "Enviar agora" se necessário`,
+          });
           out[tag] = `erro: ${e.message}`;
         }
       }
