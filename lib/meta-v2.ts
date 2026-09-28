@@ -305,11 +305,9 @@ export function resultCount(i: MetaInsight, objetivo: Obj): number {
 
 export function detectObjetivo(insight: MetaInsight): Obj {
   if (actionValue(insight, PURCHASE_TYPES) > 0) return "compras";
-  const l = leadCount(insight);
-  const c = conversationCount(insight);
-  if (l > 0 && c > 0) return "leads_conversas";
-  if (l > 0) return "leads";
-  if (c > 0) return "conversas";
+  // Leads e conversas ficam separados no automático; "leads_conversas" só quando escolhido manualmente
+  if (leadCount(insight) > 0) return "leads";
+  if (conversationCount(insight) > 0) return "conversas";
   if (insight.actions?.some((a) => /profile_visit|ig_profile|instagram_profile/i.test(a.action_type))) return "perfil";
   if (actionValue(insight, ["post_engagement"]) > 0) return "engajamento";
   return "leads";

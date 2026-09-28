@@ -96,7 +96,7 @@ export async function collectReport(opts: {
     getInsights(acct, range, "ad"),
     getDaily(acct, range).catch(() => []),
     getBreakdown(acct, range, "region").catch(() => []),
-    getBreakdown(acct, range, "age").catch(() => []),
+    getBreakdown(acct, range, "age,gender").catch(() => []),
   ]);
   const cur = curArr[0];
   if (!cur || Number(cur.spend) === 0) return { skipped: true, reason: "Sem veiculação no período" };
@@ -256,7 +256,7 @@ export async function collectReport(opts: {
   // ===== Público (estado e idade)
   const au = buildAudience(regionRows, ageRows, obj);
   let audience: ReportAudience | null = null;
-  if (au.regions.length || au.ages.length) {
+  if (au.regions.length || au.ageGender.length) {
     const withRes = au.regionResults;
     audience = {
       regions: au.regions.slice(0, 8).map((r) => ({
@@ -266,10 +266,10 @@ export async function collectReport(opts: {
         a: withRes ? fInt(r.results) : fComp(r.reach),
         b: withRes ? (r.costPerResult ? fMoney(r.costPerResult) : "—") : fMoney(r.spend),
       })),
-      ages: au.ages.filter((x) => x.label !== "Não informado").map((r) => ({ label: r.label, spendShare: r.spendShare, resultShare: r.resultShare, a: "", b: "" })),
+      ages: au.ageGender.map((r) => ({ label: r.label, female: r.female, male: r.male })),
+      ageBase: au.ageGenderBase === "results" ? `dos ${meta.resultKey.toLowerCase()}` : "das pessoas alcançadas",
       colA: withRes ? meta.resultKey : "Alcance",
       colB: withRes ? meta.custoShort : "Investido",
-      withResults: au.ageResults,
       note: withRes ? null : `A Meta não separa ${meta.resultKey.toLowerCase()} por estado para esse tipo de conversão; mostramos onde a verba e o alcance foram entregues.`,
     };
   }

@@ -158,7 +158,7 @@ export async function GET(req: NextRequest) {
       level === "campaign" ? Promise.resolve(rows) : getInsights(client.ad_account_id, range, "campaign", focus),
       level === "ad" ? Promise.resolve(rows) : getInsights(client.ad_account_id, range, "ad", focus),
       getBreakdown(client.ad_account_id, range, "region", focus).catch(() => [] as any[]),
-      getBreakdown(client.ad_account_id, range, "age", focus).catch(() => [] as any[]),
+      getBreakdown(client.ad_account_id, range, "age,gender", focus).catch(() => [] as any[]),
     ]);
     const audience = buildAudience(regionRows, ageRows, obj);
 

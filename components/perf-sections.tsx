@@ -19,6 +19,8 @@ const CARD: React.CSSProperties = {
   boxShadow: "0 1px 2px rgba(20,15,50,.04)",
 };
 const GRAD = "linear-gradient(135deg,#E8336E,#F5813C,#F9C22E)";
+const FEMALE = "#E8336E";
+const MALE = "#1A1442";
 
 const fInt = (v: number) => Math.round(v).toLocaleString("pt-BR");
 const fMoney2 = (v: number) =>
@@ -485,19 +487,31 @@ export function AudienceSection({
   meta,
   loading,
 }: {
-  audience: { regions: AudRow[]; ages: AudRow[]; regionResults: boolean; ageResults: boolean } | null | undefined;
+  audience:
+    | {
+        regions: AudRow[];
+        ages: AudRow[];
+        ageGender: { label: string; female: number; male: number }[];
+        ageGenderBase: "results" | "reach";
+        regionResults: boolean;
+        ageResults: boolean;
+      }
+    | null
+    | undefined;
   meta: { resultKey: string; custoShort: string };
   loading: boolean;
 }) {
   const [showAll, setShowAll] = useState(false);
-  if (!audience || (!audience.regions.length && !audience.ages.length)) {
+  if (!audience || (!audience.regions.length && !(audience.ageGender ?? []).length)) {
     if (!loading) return null;
   }
   const regions = audience?.regions ?? [];
-  const ages = audience?.ages ?? [];
   const visible = showAll ? regions : regions.slice(0, 8);
   const maxReg = Math.max(1, ...regions.map((r) => r.spendShare));
-  const maxAge = Math.max(1, ...ages.map((a) => Math.max(a.spendShare, a.resultShare)));
+  const ageGender = audience?.ageGender ?? [];
+  const maxAG = Math.max(1, ...ageGender.map((a) => Math.max(a.female, a.male)));
+  const totF = ageGender.reduce((x, a) => x + a.female, 0);
+  const totM = ageGender.reduce((x, a) => x + a.male, 0);
   const resKey = meta.resultKey.toLowerCase();
 
   return (
@@ -550,38 +564,38 @@ export function AudienceSection({
       </div>
 
       <div style={{ ...CARD, padding: "20px 22px" }}>
-        <SectionHead title="Faixa etária" sub={audience?.ageResults ? `verba x ${resKey} por idade` : "distribuição da verba por idade"} />
+        <SectionHead
+          title="Idade e gênero"
+          sub={audience?.ageGenderBase === "results" ? `% dos ${resKey} por faixa etária` : "% das pessoas alcançadas por faixa etária"}
+        />
         <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
-          {ages.map((a) => (
+          {ageGender.map((a) => (
             <div key={a.label} style={{ display: "grid", gridTemplateColumns: "54px 1fr", alignItems: "center", gap: 10 }}>
               <span style={{ font: `700 12px ${DISPLAY}`, color: NAVY }}>{a.label}</span>
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 40px", alignItems: "center", gap: 6 }}>
-                  <span style={{ height: 7, background: "#F1F2F7", borderRadius: 6, overflow: "hidden" }}>
-                    <span style={{ display: "block", height: "100%", width: `${(a.spendShare / maxAge) * 100}%`, background: "#C9CBD6", borderRadius: 6 }} />
-                  </span>
-                  <span style={{ font: `600 10.5px ${DISPLAY}`, color: MUTED, textAlign: "right" }}>{fPct(a.spendShare, 0)}</span>
-                </div>
-                {audience?.ageResults && (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 40px", alignItems: "center", gap: 6 }}>
+                {[
+                  { v: a.female, bg: FEMALE, key: "f" },
+                  { v: a.male, bg: MALE, key: "m" },
+                ].map((b) => (
+                  <div key={b.key} style={{ display: "grid", gridTemplateColumns: "1fr 40px", alignItems: "center", gap: 6 }}>
                     <span style={{ height: 7, background: "#F1F2F7", borderRadius: 6, overflow: "hidden" }}>
-                      <span style={{ display: "block", height: "100%", width: `${(a.resultShare / maxAge) * 100}%`, background: GRAD, borderRadius: 6 }} />
+                      <span style={{ display: "block", height: "100%", width: `${(b.v / maxAG) * 100}%`, background: b.bg, borderRadius: 6 }} />
                     </span>
-                    <span style={{ font: `700 10.5px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{fPct(a.resultShare, 0)}</span>
+                    <span style={{ font: `700 10.5px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{fPct(b.v, b.v < 1 && b.v > 0 ? 1 : 0)}</span>
                   </div>
-                )}
+                ))}
               </div>
             </div>
           ))}
-          {!ages.length && !loading && <span style={{ font: `500 12px ${BODY}`, color: MUTED }}>Sem dados no período.</span>}
+          {!ageGender.length && !loading && <span style={{ font: `500 12px ${BODY}`, color: MUTED }}>Sem dados no período.</span>}
         </div>
-        {audience?.ageResults && ages.length > 0 && (
-          <div style={{ display: "flex", gap: 14, marginTop: 14, font: `600 10.5px ${BODY}`, color: MUTED }}>
+        {ageGender.length > 0 && (
+          <div style={{ display: "flex", gap: 14, marginTop: 14, font: `600 10.5px ${BODY}`, color: MUTED, flexWrap: "wrap" }}>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ width: 10, height: 6, borderRadius: 3, background: "#C9CBD6" }} /> Verba
+              <span style={{ width: 10, height: 6, borderRadius: 3, background: FEMALE }} /> Feminino {fPct(totF, 0)}
             </span>
             <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ width: 10, height: 6, borderRadius: 3, background: GRAD }} /> {meta.resultKey}
+              <span style={{ width: 10, height: 6, borderRadius: 3, background: MALE }} /> Masculino {fPct(totM, 0)}
             </span>
           </div>
         )}

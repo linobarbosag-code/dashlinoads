@@ -337,7 +337,7 @@ export default function DashboardView({
       const pct = genderTotal > 0 ? g.spend / genderTotal : 0;
       const seg = {
         label: GENDER_LABEL[g.gender] ?? g.gender,
-        color: SEG_COLORS[i % SEG_COLORS.length],
+        color: g.gender === "female" ? "#E8336E" : g.gender === "male" ? "#1A1442" : SEG_COLORS[(i + 2) % SEG_COLORS.length],
         pctStr: fPct(pct * 100),
         dash: `${pct * CIRC} ${CIRC}`,
         offset: -segOffset,

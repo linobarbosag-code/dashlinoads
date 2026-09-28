@@ -356,9 +356,21 @@ export interface AudienceRow {
   resultShare: number; // %
 }
 
+export interface AgeGenderRow {
+  label: string; // "25-34"
+  female: number; // % do total (base = metricKey)
+  male: number; // % do total
+  femaleValue: number;
+  maleValue: number;
+}
+
 export interface Audience {
   regions: AudienceRow[];
   ages: AudienceRow[];
+  /** Idade x gênero: participação de cada faixa por sexo no total */
+  ageGender: AgeGenderRow[];
+  /** base das barras de idade x gênero: "results" (quando a Meta informa) ou "reach" */
+  ageGenderBase: "results" | "reach";
   /** false quando a Meta não devolve o resultado por região (ex.: compras do pixel) */
   regionResults: boolean;
   ageResults: boolean;
@@ -398,14 +410,50 @@ function summarize(rows: MetaInsight[], key: string, objetivo: Obj, label: (v: s
   return list;
 }
 
-export function buildAudience(regionRows: MetaInsight[], ageRows: MetaInsight[], objetivo: Obj): Audience {
+const ageLabel = (v: string) => (v === "Unknown" || !v ? "Não informado" : v);
+
+/**
+ * regionRows: breakdown "region"; ageGenderRows: breakdown "age,gender"
+ * (cada linha traz age e gender; a idade total é a soma dos dois sexos + desconhecido).
+ */
+export function buildAudience(regionRows: MetaInsight[], ageGenderRows: MetaInsight[], objetivo: Obj): Audience {
   const regions = summarize(regionRows, "region", objetivo, cleanRegion).sort((a, b) => b.spend - a.spend);
-  const ages = summarize(ageRows, "age", objetivo, (v) => (v === "Unknown" ? "Não informado" : v))
-    .filter((a) => a.label !== "Não informado" || a.spend > 0)
+  const ages = summarize(ageGenderRows, "age", objetivo, ageLabel)
+    .filter((a) => a.label !== "Não informado")
     .sort((a, b) => a.label.localeCompare(b.label, "pt-BR", { numeric: true }));
+
+  // Idade x gênero
+  const totalResults = ageGenderRows.reduce((a, r) => a + extractResult(r, objetivo).results, 0);
+  const base: "results" | "reach" = totalResults > 0 ? "results" : "reach";
+  const val = (r: MetaInsight) => (base === "results" ? extractResult(r, objetivo).results : n(r.reach));
+  const byAge = new Map<string, { f: number; m: number }>();
+  let total = 0;
+  for (const r of ageGenderRows) {
+    const age = ageLabel(String((r as any).age ?? ""));
+    const g = String((r as any).gender ?? "");
+    if (age === "Não informado" || (g !== "female" && g !== "male")) continue;
+    const v = val(r);
+    const cur = byAge.get(age) ?? { f: 0, m: 0 };
+    if (g === "female") cur.f += v;
+    else cur.m += v;
+    byAge.set(age, cur);
+    total += v;
+  }
+  const ageGender: AgeGenderRow[] = Array.from(byAge, ([label, x]) => ({
+    label,
+    femaleValue: x.f,
+    maleValue: x.m,
+    female: total > 0 ? (x.f / total) * 100 : 0,
+    male: total > 0 ? (x.m / total) * 100 : 0,
+  }))
+    .filter((x) => x.femaleValue > 0 || x.maleValue > 0)
+    .sort((a, b) => a.label.localeCompare(b.label, "pt-BR", { numeric: true }));
+
   return {
     regions,
     ages,
+    ageGender,
+    ageGenderBase: base,
     regionResults: regions.some((r) => r.results > 0),
     ageResults: ages.some((r) => r.results > 0),
   };

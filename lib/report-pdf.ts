@@ -106,10 +106,10 @@ export interface ReportAudienceRow {
 }
 export interface ReportAudience {
   regions: ReportAudienceRow[];
-  ages: ReportAudienceRow[];
+  ages: { label: string; female: number; male: number }[]; // % do total
+  ageBase: string; // "dos contatos" | "do alcance"
   colA: string;
   colB: string;
-  withResults: boolean; // idade: mostra barra de resultados
   note: string | null;
 }
 
@@ -526,7 +526,7 @@ function audienceRows(a: ReportAudience, maxRegions: number): number {
   return Math.max(Math.min(maxRegions, a.regions.length), a.ages.length);
 }
 function audienceHeight(a: ReportAudience, maxRegions = AUD_ROWS): number {
-  return 30 + 26 + audienceRows(a, maxRegions) * AUD_ROW_H + Math.max(a.note ? 22 : 6, a.withResults ? 16 : 6);
+  return 30 + 26 + audienceRows(a, maxRegions) * AUD_ROW_H + Math.max(a.note ? 22 : 6, a.ages.length ? 16 : 6);
 }
 /** Quantos estados cabem entre yTop e bottom (0 = não cabe o mínimo). */
 function audienceFit(a: ReportAudience, yTop: number, bottom: number): number {
@@ -570,34 +570,36 @@ function drawAudience(page: PDFPage, f: Fonts, a: ReportAudience, yTop: number, 
     lines.forEach((l, k) => txt(page, l, M + 12, top - h + 8 + (lines.length - 1 - k) * 7.5, 5.8, f.reg, MUTED));
   }
 
-  // Idade
+  // Idade x gênero
   const rx = M + lw + gap;
   card(page, rx, top - h, rw, h);
-  label(page, f, "Faixa etária", rx + 12, hy, 5.9);
-  const maxA = Math.max(1, ...a.ages.map((x) => Math.max(x.spendShare, a.withResults ? x.resultShare : 0)));
+  label(page, f, "Idade e gênero", rx + 12, hy, 5.9);
+  txtR(page, fit(f.reg, `% ${a.ageBase}`, 5.9, rw - 90), rx + rw - 12, hy, 5.9, f.reg, MUTED);
+  const MALE = NAVY;
+  const maxA = Math.max(1, ...a.ages.map((x) => Math.max(x.female, x.male)));
   const abw = rw - 12 - 44 - 34;
+  const pctS = (v: number) => `${v.toLocaleString("pt-BR", { maximumFractionDigits: v > 0 && v < 1 ? 1 : 0 })}%`;
   a.ages.forEach((x, i) => {
     const mid = top - 30 - i * AUD_ROW_H;
     txt(page, fit(f.bold, x.label, 7.4, 40), rx + 12, mid - 2.6, 7.4, f.bold, NAVY);
     const bx = rx + 56;
-    const bars = a.withResults
-      ? [
-          { v: x.spendShare, c: hex("#C9CBD6"), yy: mid + 1.2 },
-          { v: x.resultShare, c: PINK, yy: mid - 5.2 },
-        ]
-      : [{ v: x.spendShare, c: PINK, yy: mid - 2.3 }];
-    bars.forEach((b) => {
+    [
+      { v: x.female, c: PINK, yy: mid + 1.2 },
+      { v: x.male, c: MALE, yy: mid - 5.2 },
+    ].forEach((b) => {
       rr(page, bx, b.yy, abw, 4.2, 2.1, { fill: LINE2 });
       if (b.v > 0) rr(page, bx, b.yy, Math.max(3, (abw * b.v) / maxA), 4.2, 2.1, { fill: b.c });
-      txt(page, `${b.v.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%`, bx + abw + 5, b.yy - 0.4, 6.2, f.bold, INK2);
+      txt(page, pctS(b.v), bx + abw + 5, b.yy - 0.4, 6.2, f.bold, INK2);
     });
   });
-  if (a.withResults) {
+  if (a.ages.length) {
+    const tf = a.ages.reduce((s2, x) => s2 + x.female, 0);
+    const tm = a.ages.reduce((s2, x) => s2 + x.male, 0);
     const ly = top - h + 10;
-    rr(page, rx + 12, ly, 10, 4.2, 2.1, { fill: hex("#C9CBD6") });
-    txt(page, "verba", rx + 25, ly, 6, f.reg, MUTED);
-    rr(page, rx + 50, ly, 10, 4.2, 2.1, { fill: PINK });
-    txt(page, fit(f.reg, "resultados", 6, 60), rx + 63, ly, 6, f.reg, MUTED);
+    rr(page, rx + 12, ly, 10, 4.2, 2.1, { fill: PINK });
+    txt(page, `Feminino ${pctS(tf)}`, rx + 25, ly, 6, f.reg, INK2);
+    rr(page, rx + 82, ly, 10, 4.2, 2.1, { fill: MALE });
+    txt(page, `Masculino ${pctS(tm)}`, rx + 95, ly, 6, f.reg, INK2);
   }
 }
 
@@ -697,7 +699,8 @@ export async function buildReportPdf(input: ReportData): Promise<Uint8Array> {
           colB: S(input.audience.colB),
           note: input.audience.note ? S(input.audience.note) : null,
           regions: input.audience.regions.map((r) => ({ ...r, label: S(r.label), a: S(r.a), b: S(r.b) })),
-          ages: input.audience.ages.map((r) => ({ ...r, label: S(r.label), a: S(r.a), b: S(r.b) })),
+          ageBase: S(input.audience.ageBase),
+          ages: input.audience.ages.map((r) => ({ ...r, label: S(r.label) })),
         }
       : null,
     creatives: input.creatives.map((c) => ({
