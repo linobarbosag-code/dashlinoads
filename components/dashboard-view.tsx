@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { MetricsStrip, CampaignRanking, CreativeGallery, PeriodInsights, CreativeModal } from "@/components/perf-sections";
 
 interface Client {
   id: string;
@@ -141,6 +142,7 @@ export default function DashboardView({
   const [kwTab, setKwTab] = useState<"keywords" | "search_terms">("keywords");
   const [focus, setFocus] = useState<{ type: "campaign" | "adset" | "ad"; ids: string[]; names: string[] } | null>(null);
   const [preview, setPreview] = useState<any>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [filterTab, setFilterTab] = useState<"campaign" | "adset" | "ad">("campaign");
   const [entities, setEntities] = useState<Record<string, { id: string; name: string; status: string }[]>>({});
   const [entLoading, setEntLoading] = useState(false);
@@ -359,10 +361,32 @@ export default function DashboardView({
     .sort((a: any, b: any) => Number(b.spend) - Number(a.spend));
   const rowName = (r: any) =>
     data?.level === "ad" ? r.ad_name : data?.level === "adset" ? r.adset_name : r.campaign_name;
-  const destaques = rows
-    .slice()
-    .sort((a: any, b: any) => b.results - a.results)
-    .slice(0, 3);
+
+  async function exportPdf() {
+    if (pdfLoading) return;
+    setPdfLoading(true);
+    try {
+      const q = new URLSearchParams({ client_id: client.id, since: rangeStart, until: rangeEnd, objetivo });
+      const res = await fetch(`/api/report?${q}`);
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || "Falha ao gerar o PDF");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Relatorio_${client.name.replace(/\s+/g, "_")}_${rangeStart}_${rangeEnd}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   const dd = { position: "absolute" as const, top: "calc(100% + 8px)", zIndex: 50, background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 14, padding: 7, boxShadow: "0 20px 44px -18px rgba(20,15,50,.4)" };
 
@@ -611,9 +635,14 @@ export default function DashboardView({
             )}
           </div>
 
-          <button onClick={() => window.print()} style={{ border: "none", cursor: "pointer", background: NAVY, color: "#fff", borderRadius: 13, padding: "12px 18px", font: `600 13px ${BODY}`, display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            onClick={() => (platform === "meta" ? exportPdf() : window.print())}
+            disabled={pdfLoading}
+            title={platform === "meta" ? "Baixa o relatório completo do período selecionado" : "Imprimir a tela"}
+            style={{ border: "none", cursor: pdfLoading ? "wait" : "pointer", background: NAVY, color: "#fff", borderRadius: 13, padding: "12px 18px", font: `600 13px ${BODY}`, display: "flex", alignItems: "center", gap: 8, opacity: pdfLoading ? 0.7 : 1 }}
+          >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16" /></svg>
-            Exportar PDF
+            {pdfLoading ? "Gerando PDF..." : "Exportar PDF"}
           </button>
         </div>
 
@@ -737,6 +766,8 @@ export default function DashboardView({
           ))}
         </div>
 
+        {platform === "meta" && <MetricsStrip acc={acc} prv={prv} objetivo={data?.objetivo} />}
+
         {/* ===== FUNIL + COLUNA DIREITA ===== */}
         <div className="mid-grid" style={{ display: "grid", gap: 16, marginBottom: 16, alignItems: "start" }}>
           <div style={{ ...CARD, padding: "22px 24px" }}>
@@ -850,7 +881,21 @@ export default function DashboardView({
           </div>
         </div>
 
-        {/* ===== TABELA + DESTAQUES ===== */}
+        {platform === "meta" && (
+          <>
+            <CampaignRanking
+              campaigns={data?.campaigns ?? []}
+              meta={meta}
+              isAdmin={isAdmin}
+              focusIds={focus?.type === "campaign" ? focus.ids : []}
+              onToggle={(id, name) => toggleFocus("campaign", id, name)}
+              loading={loading}
+            />
+            <CreativeGallery creatives={data?.creatives ?? []} meta={meta} isAdmin={isAdmin} onOpen={setPreview} loading={loading} />
+          </>
+        )}
+
+        {/* ===== TABELA + LEITURA DO PERÍODO ===== */}
         <div className="bottom-grid" style={{ display: "grid", gap: 16, alignItems: "start" }}>
           <div style={{ ...CARD, padding: "20px 22px 12px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
@@ -912,41 +957,7 @@ export default function DashboardView({
             )}
           </div>
 
-          {platform === "meta" && (
-          <div style={{ ...CARD, padding: "20px 22px" }}>
-            <div style={{ font: `700 15px ${DISPLAY}`, color: NAVY, marginBottom: 3 }}>Destaques</div>
-            <div style={{ font: `500 11px ${BODY}`, color: MUTED, marginBottom: 14 }}>criativos com mais resultados no período</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {(data?.highlights ?? []).map((d: any, i: number) => (
-                <button
-                  key={d.ad_id}
-                  onClick={() => setPreview(d)}
-                  style={{ display: "flex", gap: 12, alignItems: "center", padding: 10, border: "1px solid #F0F1F6", borderRadius: 12, background: "#fff", cursor: "pointer", textAlign: "left", width: "100%" }}
-                >
-                  {d.thumb ? (
-                    /* eslint-disable-next-line @next/next/no-img-element */
-                    <img src={d.thumb} alt="" style={{ width: 52, height: 52, borderRadius: 10, objectFit: "cover", flexShrink: 0, background: "#F4F5F9" }} />
-                  ) : (
-                    <span style={{ width: 52, height: 52, borderRadius: 10, background: `linear-gradient(135deg,${FUNNEL_COLORS[i]},${FUNNEL_COLORS[i + 2] ?? "#F9C22E"})`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="3" /><circle cx="9" cy="9" r="2" /><path d="M21 15l-5-5L5 21" /></svg>
-                    </span>
-                  )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ font: `600 13px ${BODY}`, color: NAVY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.name}</div>
-                    <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
-                      <span style={{ font: `600 11px ${BODY}`, color: "#6A6A85" }}>{fInt(d.results)} {meta.resultKey.toLowerCase()}</span>
-                      <span style={{ font: `600 11px ${BODY}`, color: "#EF6D2E" }}>{d.costPerResult ? fMoney2(d.costPerResult) : "—"}</span>
-                    </div>
-                  </div>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C9CBD6" strokeWidth="2"><path d="M15 3h6v6M10 14L21 3M21 14v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5" /></svg>
-                </button>
-              ))}
-              {!(data?.highlights ?? []).length && !loading && (
-                <span style={{ font: `500 12px ${BODY}`, color: MUTED }}>Sem dados no período.</span>
-              )}
-            </div>
-          </div>
-          )}
+          {platform === "meta" && <PeriodInsights insights={data?.insights ?? []} isAdmin={isAdmin} loading={loading} />}
         </div>
 
         {platform === "google" && (
@@ -1020,50 +1031,7 @@ export default function DashboardView({
           </div>
         )}
 
-        {preview && (
-          <div
-            onClick={() => setPreview(null)}
-            style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(26,20,66,.55)", backdropFilter: "blur(3px)", display: "grid", placeItems: "center", padding: 20 }}
-          >
-            <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", borderRadius: 20, width: "100%", maxWidth: 440, overflow: "hidden", boxShadow: "0 30px 70px -20px rgba(20,15,50,.5)" }}>
-              {preview.image ? (
-                /* eslint-disable-next-line @next/next/no-img-element */
-                <img src={preview.image} alt={preview.name} style={{ width: "100%", maxHeight: 440, objectFit: "contain", background: "#0E0A26", display: "block" }} />
-              ) : (
-                <div style={{ height: 200, background: "linear-gradient(135deg,#E8336E,#F5813C,#F9C22E)", display: "grid", placeItems: "center", font: `700 15px ${DISPLAY}`, color: "#fff" }}>
-                  Prévia indisponível
-                </div>
-              )}
-              <div style={{ padding: "18px 20px" }}>
-                <div style={{ font: `700 14px ${BODY}`, color: NAVY, marginBottom: 10 }}>{preview.name}</div>
-                <div style={{ display: "flex", gap: 18, marginBottom: 16 }}>
-                  <div>
-                    <div style={{ font: `600 9px ${BODY}`, color: MUTED, textTransform: "uppercase", letterSpacing: ".05em" }}>{meta.resultKey}</div>
-                    <div style={{ font: `700 18px ${DISPLAY}`, color: NAVY }}>{fInt(preview.results)}</div>
-                  </div>
-                  <div>
-                    <div style={{ font: `600 9px ${BODY}`, color: MUTED, textTransform: "uppercase", letterSpacing: ".05em" }}>{meta.custoShort}</div>
-                    <div style={{ font: `700 18px ${DISPLAY}`, color: NAVY }}>{preview.costPerResult ? fMoney2(preview.costPerResult) : "—"}</div>
-                  </div>
-                  <div>
-                    <div style={{ font: `600 9px ${BODY}`, color: MUTED, textTransform: "uppercase", letterSpacing: ".05em" }}>Investido</div>
-                    <div style={{ font: `700 18px ${DISPLAY}`, color: NAVY }}>{fMoney2(preview.spend)}</div>
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 10 }}>
-                  {preview.permalink && (
-                    <a href={preview.permalink} target="_blank" rel="noreferrer" style={{ flex: 1, textAlign: "center", textDecoration: "none", borderRadius: 11, padding: "11px 0", font: `700 12px ${DISPLAY}`, color: "#fff", background: "linear-gradient(135deg,#E8336E,#F5813C)" }}>
-                      Ver no Instagram
-                    </a>
-                  )}
-                  <button onClick={() => setPreview(null)} style={{ flex: 1, border: "1px solid #E2E4EE", cursor: "pointer", background: "#fff", borderRadius: 11, padding: "11px 0", font: `700 12px ${DISPLAY}`, color: INK2 }}>
-                    Fechar
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {preview && <CreativeModal c={preview} meta={meta} isAdmin={isAdmin} onClose={() => setPreview(null)} />}
 
         {data?.fetched_at && (
           <p style={{ font: `500 11px ${BODY}`, color: MUTED2, marginTop: 18 }}>

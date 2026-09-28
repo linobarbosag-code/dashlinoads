@@ -61,3 +61,29 @@ body {
 @media (max-width: 720px) {
   .kw-grid { min-width: 640px; }
 }
+
+/* ===== v3: métricas detalhadas, ranking e criativos ===== */
+.metrics-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.rank-head, .rank-row {
+  display: grid;
+  grid-template-columns: 30px minmax(180px, 2.4fr) minmax(170px, 1.7fr) 0.8fr 1fr 0.8fr 1fr 118px;
+  align-items: center;
+  gap: 12px;
+}
+.creative-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+@media (max-width: 1180px) {
+  .metrics-strip { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .creative-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 1024px) {
+  .rank-head, .rank-row { grid-template-columns: 30px minmax(160px, 2fr) 0.8fr 1fr 0.8fr 1fr 118px; }
+  .rank-share { display: none; }
+}
+@media (max-width: 760px) {
+  .metrics-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .creative-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rank-head { display: none; }
+  .rank-row { grid-template-columns: 30px 1fr auto; row-gap: 6px; }
+  .rank-row > span:nth-child(n+5) { display: none; }
+}

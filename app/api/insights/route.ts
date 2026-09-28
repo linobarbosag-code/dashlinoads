@@ -20,6 +20,7 @@ import {
   type Range,
   type Focus,
 } from "@/lib/meta-v2";
+import { deriveMetrics, rankEntities, buildInsights, type Obj } from "@/lib/analysis";
 import { googleConfigured, warmupToken, gAccount, gCampaigns, gDaily, gNetworks, gKeywords, gSearchTerms } from "@/lib/google-ads";
 
 export const maxDuration = 60;
@@ -143,29 +144,80 @@ export async function GET(req: NextRequest) {
         ? detectObjetivo(cur)
         : "leads";
 
-    const enrich = (i: any) => ({
-      ...i,
-      ...extractResult(i, objetivo),
-      roas: extractRoas(i),
-      conversionValue: extractConversionValue(i),
-    });
+    const obj = objetivo as Obj;
+    const enrich = (i: any) => {
+      const m = deriveMetrics(i, obj);
+      return { ...i, ...m, m };
+    };
+    const accM = cur ? deriveMetrics(cur, obj) : null;
+    const prvM = prv ? deriveMetrics(prv, obj) : null;
 
-    // Destaques: sempre os anúncios com mais resultados no período, com criativo
-    const adRows =
-      level === "ad" ? rows : await getInsights(client.ad_account_id, range, "ad", focus);
-    const topAds = adRows
-      .map(enrich)
-      .filter((a: any) => Number(a.spend) > 0 || Number(a.impressions) > 0)
-      .sort((a: any, b: any) => b.results - a.results || Number(b.spend) - Number(a.spend))
-      .slice(0, 5);
-    const creatives = await getCreatives(topAds.map((a: any) => a.ad_id)).catch(() => ({}));
-    const highlights = topAds.map((a: any) => ({
-      ad_id: a.ad_id,
-      name: a.ad_name,
-      results: a.results,
-      costPerResult: a.costPerResult,
-      spend: Number(a.spend),
-      ...(creatives as any)[a.ad_id],
+    // Campanhas e anúncios sempre disponíveis (independente da aba da tabela)
+    const [campRows, adRows] = await Promise.all([
+      level === "campaign" ? Promise.resolve(rows) : getInsights(client.ad_account_id, range, "campaign", focus),
+      level === "ad" ? Promise.resolve(rows) : getInsights(client.ad_account_id, range, "ad", focus),
+    ]);
+
+    const accountCpr = accM?.costPerResult ?? null;
+    const rankedCampaigns = rankEntities(campRows, obj, { idKey: "campaign_id", nameKey: "campaign_name", accountCpr });
+    const rankedAds = rankEntities(adRows, obj, { idKey: "ad_id", nameKey: "ad_name", accountCpr, withHook: true });
+
+    // Criativos: top 12 (por resultados e por verba) + todos que têm selo
+    const pick = new Map<string, (typeof rankedAds)[number]>();
+    rankedAds.slice(0, 12).forEach((a) => pick.set(a.id, a));
+    [...rankedAds].sort((a, b) => b.m.spend - a.m.spend).slice(0, 6).forEach((a) => pick.set(a.id, a));
+    rankedAds.filter((a) => a.badges.length).forEach((a) => pick.set(a.id, a));
+    const chosen = Array.from(pick.values()).slice(0, 18);
+    const creativeInfo = await getCreatives(chosen.map((a) => a.id)).catch(() => ({} as Record<string, any>));
+
+    const creatives = rankedAds
+      .filter((a) => pick.has(a.id))
+      .map((a) => ({
+        ad_id: a.id,
+        name: a.name,
+        campaign_name: (a.raw as any).campaign_name ?? "",
+        adset_name: (a.raw as any).adset_name ?? "",
+        m: a.m,
+        spendShare: a.spendShare,
+        resultShare: a.resultShare,
+        index: a.index,
+        tier: a.tier,
+        badges: a.badges,
+        ...((creativeInfo as any)[a.id] ?? {}),
+      }));
+
+    const campaigns = rankedCampaigns.map((c) => ({
+      campaign_id: c.id,
+      name: c.name,
+      m: c.m,
+      spendShare: c.spendShare,
+      resultShare: c.resultShare,
+      index: c.index,
+      tier: c.tier,
+      badges: c.badges,
+    }));
+
+    const insights = accM
+      ? buildInsights({
+          objetivo: obj,
+          account: accM,
+          previous: prvM,
+          campaigns: rankedCampaigns,
+          creatives: rankedAds,
+          compareLabel: "período anterior",
+        })
+      : [];
+
+    // Compatibilidade: destaques antigos (top 5 criativos por resultado)
+    const highlights = creatives.slice(0, 5).map((c: any) => ({
+      ad_id: c.ad_id,
+      name: c.name,
+      results: c.m.results,
+      costPerResult: c.m.costPerResult,
+      spend: c.m.spend,
+      thumb: c.thumb,
+      image: c.image,
+      permalink: c.permalink,
     }));
 
     const delivered = rows
@@ -180,6 +232,9 @@ export async function GET(req: NextRequest) {
       previous: prv ? enrich(prv) : null,
       funnel: cur ? buildFunnel(cur, objetivo) : [],
       highlights,
+      campaigns,
+      creatives,
+      insights,
       rows: delivered,
       level,
       focus,

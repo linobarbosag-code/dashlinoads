@@ -33,13 +33,13 @@ export interface MetaInsight {
 }
 
 const BASE_FIELDS =
-  "spend,impressions,reach,clicks,inline_link_clicks,ctr,cpc,cpm,actions,action_values,cost_per_action_type,purchase_roas";
+  "spend,impressions,reach,frequency,clicks,inline_link_clicks,inline_link_click_ctr,cost_per_inline_link_click,ctr,cpc,cpm,actions,action_values,cost_per_action_type,purchase_roas,video_thruplay_watched_actions";
 
 const LEVEL_FIELDS: Record<string, string> = {
   account: BASE_FIELDS,
   campaign: BASE_FIELDS + ",campaign_id,campaign_name",
-  adset: BASE_FIELDS + ",adset_id,adset_name,campaign_name",
-  ad: BASE_FIELDS + ",ad_id,ad_name,campaign_name",
+  adset: BASE_FIELDS + ",adset_id,adset_name,campaign_id,campaign_name",
+  ad: BASE_FIELDS + ",ad_id,ad_name,adset_name,campaign_id,campaign_name",
 };
 
 const META_TIMEOUT_MS = 25000;
@@ -257,6 +257,11 @@ export const RESULT_META: Record<
   engajamento: { resultKey: "Engajamentos", custoKey: "Custo por engaj.", custoShort: "Custo/eng." },
 };
 
+/** Valor de uma action (primeiro tipo encontrado da lista). */
+export function actionOf(insight: MetaInsight, types: string[]): number {
+  return actionValue(insight, types);
+}
+
 function actionValue(insight: MetaInsight, types: string[]): number {
   for (const t of types) {
     const a = insight.actions?.find((x) => x.action_type === t);
@@ -345,24 +350,47 @@ export function buildFunnel(
 }
 
 
-/** Criativos de uma lista de anúncios (miniatura grande, imagem e permalink). */
-export async function getCreatives(
-  adIds: string[]
-): Promise<Record<string, { thumb: string | null; image: string | null; permalink: string | null }>> {
-  if (!adIds.length) return {};
-  const json = await metaFetch(`/`, {
-    ids: adIds.join(","),
-    fields:
-      "creative.thumbnail_width(600).thumbnail_height(600){thumbnail_url,image_url,instagram_permalink_url}",
-  });
-  const out: Record<string, { thumb: string | null; image: string | null; permalink: string | null }> = {};
-  for (const id of adIds) {
-    const c = json[id]?.creative ?? {};
-    out[id] = {
-      thumb: c.thumbnail_url ?? null,
-      image: c.image_url ?? c.thumbnail_url ?? null,
-      permalink: c.instagram_permalink_url ?? null,
-    };
+export interface CreativeInfo {
+  thumb: string | null;
+  image: string | null;
+  permalink: string | null;
+  previewLink: string | null;
+  body: string | null;
+  title: string | null;
+  type: string | null; // VIDEO | PHOTO | SHARE ...
+  status: string | null;
+}
+
+/** Criativos de uma lista de anúncios: miniatura, imagem, copy, tipo e links. */
+export async function getCreatives(adIds: string[]): Promise<Record<string, CreativeInfo>> {
+  const ids = Array.from(new Set(adIds.filter(Boolean)));
+  if (!ids.length) return {};
+  const FULL =
+    "effective_status,preview_shareable_link,creative.thumbnail_width(600).thumbnail_height(600){thumbnail_url,image_url,instagram_permalink_url,object_type,body,title}";
+  const MIN = "creative.thumbnail_width(600).thumbnail_height(600){thumbnail_url,image_url,instagram_permalink_url}";
+  const out: Record<string, CreativeInfo> = {};
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
+    let json: any;
+    try {
+      json = await metaFetch(`/`, { ids: chunk.join(","), fields: FULL });
+    } catch {
+      json = await metaFetch(`/`, { ids: chunk.join(","), fields: MIN }); // fallback de campos
+    }
+    for (const id of chunk) {
+      const ad = json[id] ?? {};
+      const c = ad.creative ?? {};
+      out[id] = {
+        thumb: c.thumbnail_url ?? null,
+        image: c.image_url ?? c.thumbnail_url ?? null,
+        permalink: c.instagram_permalink_url ?? null,
+        previewLink: ad.preview_shareable_link ?? null,
+        body: c.body ?? null,
+        title: c.title ?? null,
+        type: c.object_type ?? null,
+        status: ad.effective_status ?? null,
+      };
+    }
   }
   return out;
 }
