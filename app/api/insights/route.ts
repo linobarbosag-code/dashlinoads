@@ -1,5 +1,5 @@
 // app/api/insights/route.ts — v2
-// ?client_id=...&since=YYYY-MM-DD&until=YYYY-MM-DD&objetivo=auto|compras|leads|conversas|engajamento&level=campaign|adset|ad
+// ?client_id=...&since=YYYY-MM-DD&until=YYYY-MM-DD&objetivo=auto|compras|infoproduto|leads|conversas|leads_conversas|perfil|engajamento&level=campaign|adset|ad
 
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
@@ -10,6 +10,7 @@ import {
   getAccountInfo,
   previousRange,
   detectObjetivo,
+  actionTypes,
   extractResult,
   extractRoas,
   extractConversionValue,
@@ -20,7 +21,7 @@ import {
   type Range,
   type Focus,
 } from "@/lib/meta-v2";
-import { deriveMetrics, rankEntities, buildInsights, type Obj } from "@/lib/analysis";
+import { deriveMetrics, rankEntities, buildInsights, buildAudience, type Obj } from "@/lib/analysis";
 import { googleConfigured, warmupToken, gAccount, gCampaigns, gDaily, gNetworks, gKeywords, gSearchTerms } from "@/lib/google-ads";
 
 export const maxDuration = 60;
@@ -153,10 +154,18 @@ export async function GET(req: NextRequest) {
     const prvM = prv ? deriveMetrics(prv, obj) : null;
 
     // Campanhas e anúncios sempre disponíveis (independente da aba da tabela)
-    const [campRows, adRows] = await Promise.all([
+    const [campRows, adRows, regionRows, ageRows] = await Promise.all([
       level === "campaign" ? Promise.resolve(rows) : getInsights(client.ad_account_id, range, "campaign", focus),
       level === "ad" ? Promise.resolve(rows) : getInsights(client.ad_account_id, range, "ad", focus),
+      getBreakdown(client.ad_account_id, range, "region", focus).catch(() => [] as any[]),
+      getBreakdown(client.ad_account_id, range, "age", focus).catch(() => [] as any[]),
     ]);
+    const audience = buildAudience(regionRows, ageRows, obj);
+
+    // Diagnóstico: quais actions a Meta devolve (confirma o nome da métrica de visitas ao perfil)
+    if (obj === "perfil" && cur) {
+      console.log("[insights] perfil action_types", client.name, JSON.stringify(actionTypes(cur)));
+    }
 
     const accountCpr = accM?.costPerResult ?? null;
     const rankedCampaigns = rankEntities(campRows, obj, { idKey: "campaign_id", nameKey: "campaign_name", accountCpr });
@@ -235,6 +244,7 @@ export async function GET(req: NextRequest) {
       campaigns,
       creatives,
       insights,
+      audience,
       rows: delivered,
       level,
       focus,

@@ -111,3 +111,9 @@ $$;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+-- Objetivo padrão por conta (usado no dashboard e no relatório)
+-- alter table public.clients add column if not exists objetivo text not null default 'auto';
+alter table public.clients drop constraint if exists clients_objetivo_check;
+alter table public.clients add constraint clients_objetivo_check
+  check (objetivo = any (array['auto','compras','infoproduto','leads','conversas','leads_conversas','perfil','engajamento']::text[]));

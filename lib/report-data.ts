@@ -4,6 +4,7 @@ import {
   getInsights,
   getDaily,
   getCreatives,
+  getBreakdown,
   detectObjetivo,
   extractResult,
   buildFunnel,
@@ -11,8 +12,8 @@ import {
   type Objetivo,
   type Range,
 } from "@/lib/meta-v2";
-import { deriveMetrics, rankEntities, buildInsights, type Obj, type Metrics, type Ranked } from "@/lib/analysis";
-import type { ReportData, ReportImage } from "@/lib/report-pdf";
+import { deriveMetrics, rankEntities, buildInsights, buildAudience, type Obj, type Metrics, type Ranked } from "@/lib/analysis";
+import type { ReportData, ReportImage, ReportAudience } from "@/lib/report-pdf";
 
 const fInt = (v: number) => Math.round(v).toLocaleString("pt-BR");
 const fMoney = (v: number) => "R$ " + v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -88,12 +89,14 @@ export async function collectReport(opts: {
   const { client, range, prevRange } = opts;
   const acct = client.ad_account_id;
 
-  const [curArr, prevArr, campRows, adRows, dailyRows] = await Promise.all([
+  const [curArr, prevArr, campRows, adRows, dailyRows, regionRows, ageRows] = await Promise.all([
     getInsights(acct, range, "account"),
     getInsights(acct, prevRange, "account"),
     getInsights(acct, range, "campaign"),
     getInsights(acct, range, "ad"),
     getDaily(acct, range).catch(() => []),
+    getBreakdown(acct, range, "region").catch(() => []),
+    getBreakdown(acct, range, "age").catch(() => []),
   ]);
   const cur = curArr[0];
   if (!cur || Number(cur.spend) === 0) return { skipped: true, reason: "Sem veiculação no período" };
@@ -123,6 +126,24 @@ export async function collectReport(opts: {
       { label: "ROAS", value: A.roas ? A.roas.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) + "x" : "—", ...delta(A.roas, P?.roas, sfx) },
       { label: "Ticket médio", value: A.ticket ? fMoney(A.ticket) : "—", ...delta(A.ticket, P?.ticket, sfx) }
     );
+  } else if (obj === "leads_conversas") {
+    kpis.push(
+      { label: "Leads (formulário)", value: fInt(A.leads), ...delta(A.leads, P?.leads, sfx) },
+      { label: "Conversas iniciadas", value: fInt(A.conversations), ...delta(A.conversations, P?.conversations, sfx) },
+      { label: "Pessoas alcançadas", value: fComp(A.reach), ...delta(A.reach, P?.reach, sfx) }
+    );
+  } else if (obj === "perfil") {
+    kpis.push(
+      { label: "Pessoas alcançadas", value: fComp(A.reach), ...delta(A.reach, P?.reach, sfx) },
+      { label: "Engajamentos", value: fComp(A.engagement), ...delta(A.engagement, P?.engagement, sfx) },
+      { label: "CTR do link", value: A.linkCtr != null ? fPct(A.linkCtr) : "—", ...delta(A.linkCtr, P?.linkCtr, sfx) }
+    );
+  } else if (obj === "engajamento") {
+    kpis.push(
+      { label: "Pessoas alcançadas", value: fComp(A.reach), ...delta(A.reach, P?.reach, sfx) },
+      { label: "Taxa de engajamento", value: A.engagementRate != null ? fPct(A.engagementRate) : "—", ...delta(A.engagementRate, P?.engagementRate, sfx) },
+      { label: "CPM", value: A.cpm != null ? fMoney(A.cpm) : "—", ...delta(A.cpm, P?.cpm, sfx, true) }
+    );
   } else {
     kpis.push(
       { label: "Pessoas alcançadas", value: fComp(A.reach), ...delta(A.reach, P?.reach, sfx) },
@@ -137,14 +158,23 @@ export async function collectReport(opts: {
   const add = (l: string, v: string | null) => {
     if (v && !used.has(l)) sec.push({ label: l, value: v });
   };
+  const social = obj === "perfil" || obj === "engajamento";
+  if (social) {
+    if (obj === "perfil") add("Custo por engajamento", A.costPerEngagement != null ? fMoney(A.costPerEngagement) : null);
+    add("Taxa de engajamento", A.engagementRate != null ? fPct(A.engagementRate) : null);
+    add("Reações", A.reactions > 0 ? fComp(A.reactions) : null);
+    add("Comentários", A.comments > 0 ? fComp(A.comments) : null);
+    add("Compartilhamentos", A.shares > 0 ? fComp(A.shares) : null);
+    add("Salvamentos", A.saves > 0 ? fComp(A.saves) : null);
+  }
   add("Impressões", fComp(A.impressions));
   add("Pessoas alcançadas", fComp(A.reach));
   add("Frequência", A.frequency ? A.frequency.toLocaleString("pt-BR", { maximumFractionDigits: 2 }) : null);
-  add("Cliques no link", fComp(A.linkClicks));
+  if (obj !== "perfil") add("Cliques no link", fComp(A.linkClicks));
   add("CTR do link", A.linkCtr != null ? fPct(A.linkCtr) : null);
   add("CPC do link", A.cpc != null ? fMoney(A.cpc) : null);
   add("CPM", A.cpm != null ? fMoney(A.cpm) : null);
-  add("Custo por visita", A.costPerLpv != null ? fMoney(A.costPerLpv) : null);
+  if (!social) add("Custo por visita", A.costPerLpv != null ? fMoney(A.costPerLpv) : null);
   add("Taxa de conversão", A.convRate != null ? fPct(A.convRate) : null);
   add("Gancho do vídeo", A.hookRate != null ? fPct(A.hookRate, 1) : null);
   add("Retenção do vídeo", A.holdRate != null ? fPct(A.holdRate, 1) : null);
@@ -223,6 +253,27 @@ export async function collectReport(opts: {
     };
   });
 
+  // ===== Público (estado e idade)
+  const au = buildAudience(regionRows, ageRows, obj);
+  let audience: ReportAudience | null = null;
+  if (au.regions.length || au.ages.length) {
+    const withRes = au.regionResults;
+    audience = {
+      regions: au.regions.slice(0, 8).map((r) => ({
+        label: r.label,
+        spendShare: r.spendShare,
+        resultShare: r.resultShare,
+        a: withRes ? fInt(r.results) : fComp(r.reach),
+        b: withRes ? (r.costPerResult ? fMoney(r.costPerResult) : "—") : fMoney(r.spend),
+      })),
+      ages: au.ages.filter((x) => x.label !== "Não informado").map((r) => ({ label: r.label, spendShare: r.spendShare, resultShare: r.resultShare, a: "", b: "" })),
+      colA: withRes ? meta.resultKey : "Alcance",
+      colB: withRes ? meta.custoShort : "Investido",
+      withResults: au.ageResults,
+      note: withRes ? null : `A Meta não separa ${meta.resultKey.toLowerCase()} por estado para esse tipo de conversão; mostramos onde a verba e o alcance foram entregues.`,
+    };
+  }
+
   const data: ReportData = {
     clientName: client.name,
     periodLabel: opts.periodLabel,
@@ -239,6 +290,7 @@ export async function collectReport(opts: {
     campaigns: repCampaigns,
     moreCampaigns: Math.max(0, campaigns.length - maxCamp),
     creatives,
+    audience,
   };
 
   const bestC = campaigns.find((c) => c.badges.includes("most_results"));

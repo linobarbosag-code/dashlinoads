@@ -87,3 +87,16 @@ body {
   .rank-row { grid-template-columns: 30px 1fr auto; row-gap: 6px; }
   .rank-row > span:nth-child(n+5) { display: none; }
 }
+
+/* Público: estados e idade */
+.audience-grid { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+.aud-row { display: grid; grid-template-columns: minmax(140px, 1.6fr) minmax(110px, 1.3fr) 70px 70px 86px; align-items: center; gap: 12px; padding: 9px 0; border-top: 1px solid #F1F2F7; }
+.aud-row.aud-nores { grid-template-columns: minmax(140px, 1.6fr) minmax(110px, 2fr) 80px; }
+.aud-head { border-top: none; padding-top: 0; font: 600 9.5px 'Plus Jakarta Sans', sans-serif; color: #A0A4B4; letter-spacing: .05em; text-transform: uppercase; }
+@media (max-width: 1024px) { .audience-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .aud-row { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 56px; }
+  .aud-row > span:nth-child(3) { display: none; }
+  .aud-row.aud-nores { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); }
+  .aud-row > span:nth-child(n+5) { display: none; }
+}

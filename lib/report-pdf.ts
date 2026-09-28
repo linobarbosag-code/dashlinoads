@@ -1,7 +1,8 @@
-// lib/report-pdf.ts — Relatório de desempenho em PDF (3 páginas), identidade LinoADS.
+// lib/report-pdf.ts — Relatório de desempenho em PDF, identidade LinoADS.
 // Página 1: resumo, KPIs, métricas detalhadas, evolução diária, leitura do período
-// Página 2: funil + ranking de campanhas
+// Página 2: funil + ranking de campanhas (+ público por estado/idade, se couber)
 // Página 3: criativos em destaque (com imagem)
+// Página 4: público, quando não coube na página 2
 import {
   PDFDocument,
   StandardFonts,
@@ -94,6 +95,22 @@ export interface ReportData {
   campaigns: ReportCampaign[];
   moreCampaigns: number;
   creatives: ReportCreative[];
+  audience?: ReportAudience | null;
+}
+export interface ReportAudienceRow {
+  label: string;
+  spendShare: number;
+  resultShare: number;
+  a: string; // coluna 1 (resultados ou alcance)
+  b: string; // coluna 2 (custo por resultado ou investido)
+}
+export interface ReportAudience {
+  regions: ReportAudienceRow[];
+  ages: ReportAudienceRow[];
+  colA: string;
+  colB: string;
+  withResults: boolean; // idade: mostra barra de resultados
+  note: string | null;
 }
 
 // ===== Texto seguro para WinAnsi (Helvetica)
@@ -423,8 +440,8 @@ function drawFunnel(page: PDFPage, f: Fonts, d: ReportData, yTop: number): numbe
   return yTop - h - 14;
 }
 
-function drawCampaigns(page: PDFPage, f: Fonts, d: ReportData, yTop: number, bottom: number) {
-  if (!d.campaigns.length) return;
+function drawCampaigns(page: PDFPage, f: Fonts, d: ReportData, yTop: number, bottom: number): number {
+  if (!d.campaigns.length) return yTop;
   txt(page, "Ranking de campanhas", M, yTop - 4, 9.5, f.bold);
   txt(page, "Ordenado por resultados. Eficiência comparada ao custo médio da conta no período.", M, yTop - 16, 6.8, f.reg, MUTED);
   let y = yTop - 28;
@@ -451,7 +468,8 @@ function drawCampaigns(page: PDFPage, f: Fonts, d: ReportData, yTop: number, bot
   label(page, f, "Campanha", X.name, hy, 5.9);
   label(page, f, "Verba  x  resultados", X.share, hy, 5.9);
   const hr = (s: string, xr: number) => txtR(page, s.toUpperCase(), xr, hy, 5.9, f.bold, MUTED);
-  hr(fit(f.bold, d.resultKey.toUpperCase(), 5.9, 50), X.results);
+  const rk = f.bold.widthOfTextAtSize(d.resultKey.toUpperCase(), 5.9) > 50 ? d.resultKey.split(" ")[0] : d.resultKey;
+  hr(fit(f.bold, rk.toUpperCase(), 5.9, 50), X.results);
   hr(fit(f.bold, d.custoShort.toUpperCase(), 5.9, 52), X.cost);
   hr("CTR link", X.ctr);
   hr("Investido", X.spend);
@@ -498,6 +516,89 @@ function drawCampaigns(page: PDFPage, f: Fonts, d: ReportData, yTop: number, bot
   const extra = d.moreCampaigns + (d.campaigns.length - rows.length);
   if (extra > 0) txtR(page, `+ ${extra} campanha(s) com menor investimento no período`, M + CW, ly - 1, 6.3, f.reg, MUTED);
   ly -= 10;
+  return ly - 8;
+}
+
+// ===== Público (estado e idade)
+const AUD_ROWS = 8;
+const AUD_ROW_H = 17;
+function audienceRows(a: ReportAudience, maxRegions: number): number {
+  return Math.max(Math.min(maxRegions, a.regions.length), a.ages.length);
+}
+function audienceHeight(a: ReportAudience, maxRegions = AUD_ROWS): number {
+  return 30 + 26 + audienceRows(a, maxRegions) * AUD_ROW_H + Math.max(a.note ? 22 : 6, a.withResults ? 16 : 6);
+}
+/** Quantos estados cabem entre yTop e bottom (0 = não cabe o mínimo). */
+function audienceFit(a: ReportAudience, yTop: number, bottom: number): number {
+  for (let n = AUD_ROWS; n >= 5; n--) if (yTop - audienceHeight(a, n) >= bottom) return n;
+  return 0;
+}
+
+function drawAudience(page: PDFPage, f: Fonts, a: ReportAudience, yTop: number, maxRegions = AUD_ROWS) {
+  txt(page, "Onde está o público", M, yTop - 4, 9.5, f.bold);
+  txt(page, "Distribuição por estado e por faixa etária. A Meta não informa cidade nos relatórios de anúncios.", M, yTop - 16, 6.8, f.reg, MUTED);
+  const top = yTop - 28;
+  const h = audienceHeight(a, maxRegions) - 30;
+  const gap = 12;
+  const lw = Math.round(CW * 0.6);
+  const rw = CW - lw - gap;
+
+  // Estados
+  card(page, M, top - h, lw, h);
+  const regions = a.regions.slice(0, maxRegions);
+  const X = { name: M + 12, bar: M + 104, a: M + lw - 74, b: M + lw - 12 };
+  const hy = top - 14;
+  label(page, f, "Estado", X.name, hy, 5.9);
+  label(page, f, "% da verba", X.bar, hy, 5.9);
+  txtR(page, fit(f.bold, a.colA.toUpperCase(), 5.9, 64), X.a, hy, 5.9, f.bold, MUTED);
+  txtR(page, fit(f.bold, a.colB.toUpperCase(), 5.9, 50), X.b, hy, 5.9, f.bold, MUTED);
+  const maxS = Math.max(1, ...regions.map((r) => r.spendShare));
+  const bw = X.a - 60 - X.bar;
+  regions.forEach((r, i) => {
+    const mid = top - 30 - i * AUD_ROW_H;
+    if (i > 0) page.drawLine({ start: { x: M + 8, y: mid + 8.5 }, end: { x: M + lw - 8, y: mid + 8.5 }, thickness: 0.4, color: LINE2 });
+    txt(page, String(i + 1), X.name, mid - 2.6, 6.5, f.bold, MUTED2);
+    txt(page, fit(f.bold, r.label, 7.4, X.bar - X.name - 16), X.name + 11, mid - 2.6, 7.4, f.bold, NAVY);
+    rr(page, X.bar, mid - 2.3, bw, 5, 2.5, { fill: LINE2 });
+    rr(page, X.bar, mid - 2.3, Math.max(3, (bw * r.spendShare) / maxS), 5, 2.5, { fill: PINK });
+    txt(page, `${r.spendShare.toLocaleString("pt-BR", { maximumFractionDigits: r.spendShare < 1 ? 1 : 0 })}%`, X.bar + bw + 5, mid - 2.4, 6.5, f.bold, INK2);
+    txtR(page, r.a, X.a, mid - 2.8, 8, f.bold, NAVY);
+    txtR(page, r.b, X.b, mid - 2.8, 7.4, f.reg, INK2);
+  });
+  if (a.note) {
+    const lines = wrap(f.reg, a.note, 5.8, lw - 24, 2);
+    lines.forEach((l, k) => txt(page, l, M + 12, top - h + 8 + (lines.length - 1 - k) * 7.5, 5.8, f.reg, MUTED));
+  }
+
+  // Idade
+  const rx = M + lw + gap;
+  card(page, rx, top - h, rw, h);
+  label(page, f, "Faixa etária", rx + 12, hy, 5.9);
+  const maxA = Math.max(1, ...a.ages.map((x) => Math.max(x.spendShare, a.withResults ? x.resultShare : 0)));
+  const abw = rw - 12 - 44 - 34;
+  a.ages.forEach((x, i) => {
+    const mid = top - 30 - i * AUD_ROW_H;
+    txt(page, fit(f.bold, x.label, 7.4, 40), rx + 12, mid - 2.6, 7.4, f.bold, NAVY);
+    const bx = rx + 56;
+    const bars = a.withResults
+      ? [
+          { v: x.spendShare, c: hex("#C9CBD6"), yy: mid + 1.2 },
+          { v: x.resultShare, c: PINK, yy: mid - 5.2 },
+        ]
+      : [{ v: x.spendShare, c: PINK, yy: mid - 2.3 }];
+    bars.forEach((b) => {
+      rr(page, bx, b.yy, abw, 4.2, 2.1, { fill: LINE2 });
+      if (b.v > 0) rr(page, bx, b.yy, Math.max(3, (abw * b.v) / maxA), 4.2, 2.1, { fill: b.c });
+      txt(page, `${b.v.toLocaleString("pt-BR", { maximumFractionDigits: 0 })}%`, bx + abw + 5, b.yy - 0.4, 6.2, f.bold, INK2);
+    });
+  });
+  if (a.withResults) {
+    const ly = top - h + 10;
+    rr(page, rx + 12, ly, 10, 4.2, 2.1, { fill: hex("#C9CBD6") });
+    txt(page, "verba", rx + 25, ly, 6, f.reg, MUTED);
+    rr(page, rx + 50, ly, 10, 4.2, 2.1, { fill: PINK });
+    txt(page, fit(f.reg, "resultados", 6, 60), rx + 63, ly, 6, f.reg, MUTED);
+  }
 }
 
 // ===== Página 3
@@ -589,6 +690,16 @@ export async function buildReportPdf(input: ReportData): Promise<Uint8Array> {
     highlights: input.highlights.map(S).filter(Boolean),
     funnel: input.funnel.map((x) => ({ ...x, stage: S(x.stage), valueStr: S(x.valueStr) })),
     campaigns: input.campaigns.map((c) => ({ ...c, name: S(c.name) || "(sem nome)", results: S(c.results), cost: S(c.cost), ctr: S(c.ctr), spend: S(c.spend) })),
+    audience: input.audience
+      ? {
+          ...input.audience,
+          colA: S(input.audience.colA),
+          colB: S(input.audience.colB),
+          note: input.audience.note ? S(input.audience.note) : null,
+          regions: input.audience.regions.map((r) => ({ ...r, label: S(r.label), a: S(r.a), b: S(r.b) })),
+          ages: input.audience.ages.map((r) => ({ ...r, label: S(r.label), a: S(r.a), b: S(r.b) })),
+        }
+      : null,
     creatives: input.creatives.map((c) => ({
       ...c,
       name: S(c.name) || "(sem nome)",
@@ -628,7 +739,14 @@ export async function buildReportPdf(input: ReportData): Promise<Uint8Array> {
   let y2 = H - 116;
   if (!highlightsOnP1) y2 = drawHighlights(p2, f, d, y2, 300);
   y2 = drawFunnel(p2, f, d, y2);
-  drawCampaigns(p2, f, d, y2, 48);
+  y2 = drawCampaigns(p2, f, d, y2, 48);
+  const aud = d.audience && (d.audience.regions.length || d.audience.ages.length) ? d.audience : null;
+  let audienceDone = false;
+  const fitRows = aud ? audienceFit(aud, y2, 48) : 0;
+  if (aud && fitRows) {
+    drawAudience(p2, f, aud, y2, fitRows);
+    audienceDone = true;
+  }
 
   // Página 3
   if (hasCreatives) {
@@ -636,6 +754,14 @@ export async function buildReportPdf(input: ReportData): Promise<Uint8Array> {
     pages.push(p3);
     header(p3, f, d, logo, "Criativos em destaque");
     await drawCreatives(doc, p3, f, d, H - 112);
+  }
+
+  // Público em página própria quando não coube na página 2
+  if (aud && !audienceDone) {
+    const p4 = doc.addPage([W, H]);
+    pages.push(p4);
+    header(p4, f, d, logo, "Público");
+    drawAudience(p4, f, aud, H - 116);
   }
 
   pages.forEach((p, i) => footer(p, f, i + 1, pages.length));

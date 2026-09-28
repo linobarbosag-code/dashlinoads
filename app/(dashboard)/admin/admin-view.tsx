@@ -57,6 +57,8 @@ const OBJETIVOS = [
   { key: "infoproduto", label: "Infoproduto" },
   { key: "leads", label: "Leads" },
   { key: "conversas", label: "Conversas" },
+  { key: "leads_conversas", label: "Leads + Conversas" },
+  { key: "perfil", label: "Visitas ao perfil" },
   { key: "engajamento", label: "Engajamento" },
 ];
 

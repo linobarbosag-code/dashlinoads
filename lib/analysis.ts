@@ -4,6 +4,9 @@
 import {
   actionOf,
   extractResult,
+  leadCount,
+  conversationCount,
+  profileVisitCount,
   extractRoas,
   extractConversionValue,
   RESULT_META,
@@ -36,6 +39,19 @@ export interface Metrics {
   thruplays: number;
   hookRate: number | null; // views 3s / impressões, %
   holdRate: number | null; // thruplays / views 3s, %
+  // Contatos e perfil
+  leads: number;
+  conversations: number;
+  profileVisits: number;
+  costPerProfileVisit: number | null;
+  // Engajamento
+  engagement: number;
+  reactions: number;
+  comments: number;
+  shares: number;
+  saves: number;
+  engagementRate: number | null; // engajamentos / impressões, %
+  costPerEngagement: number | null;
 }
 
 const n = (v: any) => {
@@ -56,6 +72,8 @@ export function deriveMetrics(i: MetaInsight, objetivo: Obj): Metrics {
   const conversionValue = extractConversionValue(i);
   const purchases = actionOf(i, ["purchase", "offsite_conversion.fb_pixel_purchase", "omni_purchase"]);
   const roasApi = extractRoas(i);
+  const profileVisits = profileVisitCount(i);
+  const engagement = actionOf(i, ["post_engagement"]);
 
   return {
     spend,
@@ -72,7 +90,8 @@ export function deriveMetrics(i: MetaInsight, objetivo: Obj): Metrics {
     costPerLpv: lpv > 0 ? spend / lpv : null,
     results,
     costPerResult,
-    convRate: linkClicks > 0 && results > 0 ? (results / linkClicks) * 100 : null,
+    convRate:
+      objetivo !== "perfil" && objetivo !== "engajamento" && linkClicks > 0 && results > 0 ? (results / linkClicks) * 100 : null,
     conversionValue,
     roas: roasApi ?? (conversionValue && spend > 0 ? conversionValue / spend : null),
     ticket: conversionValue && purchases > 0 ? conversionValue / purchases : null,
@@ -80,6 +99,17 @@ export function deriveMetrics(i: MetaInsight, objetivo: Obj): Metrics {
     thruplays,
     hookRate: impressions > 0 && video3s > 0 ? (video3s / impressions) * 100 : null,
     holdRate: video3s > 0 && thruplays > 0 ? (thruplays / video3s) * 100 : null,
+    leads: leadCount(i),
+    conversations: conversationCount(i),
+    profileVisits,
+    costPerProfileVisit: profileVisits > 0 ? spend / profileVisits : null,
+    engagement,
+    reactions: actionOf(i, ["post_reaction"]),
+    comments: actionOf(i, ["comment"]),
+    shares: actionOf(i, ["post"]),
+    saves: actionOf(i, ["onsite_conversion.post_save"]),
+    engagementRate: impressions > 0 && engagement > 0 ? (engagement / impressions) * 100 : null,
+    costPerEngagement: engagement > 0 ? spend / engagement : null,
   };
 }
 
@@ -265,6 +295,25 @@ export function buildInsights(opts: {
     });
   }
 
+  if (objetivo === "leads_conversas" && account.leads > 0 && account.conversations > 0) {
+    out.push({
+      kind: "info",
+      text: `Dos ${intFmt(account.results)} contatos, ${intFmt(account.leads)} vieram por formulário/cadastro e ${intFmt(account.conversations)} por conversa iniciada.`,
+    });
+  }
+  if ((objetivo === "perfil" || objetivo === "engajamento") && account.engagement > 0) {
+    const parts = [
+      account.reactions > 0 ? `${intFmt(account.reactions)} reações` : "",
+      account.comments > 0 ? `${intFmt(account.comments)} comentários` : "",
+      account.shares > 0 ? `${intFmt(account.shares)} compartilhamentos` : "",
+      account.saves > 0 ? `${intFmt(account.saves)} salvamentos` : "",
+    ].filter(Boolean);
+    out.push({
+      kind: "info",
+      text: `Os anúncios geraram ${intFmt(account.engagement)} engajamentos${parts.length ? ` (${parts.join(", ")})` : ""}${account.costPerEngagement ? `, a ${moneyFmt(account.costPerEngagement)} cada` : ""}.`,
+    });
+  }
+
   if (account.reach > 0) {
     out.push({
       kind: "info",
@@ -289,4 +338,75 @@ export function buildInsights(opts: {
     });
   }
   return out;
+}
+
+
+// ===== Público: onde (estado) e quem (idade) =====
+
+export interface AudienceRow {
+  key: string;
+  label: string;
+  spend: number;
+  impressions: number;
+  reach: number;
+  linkClicks: number;
+  results: number;
+  costPerResult: number | null;
+  spendShare: number; // %
+  resultShare: number; // %
+}
+
+export interface Audience {
+  regions: AudienceRow[];
+  ages: AudienceRow[];
+  /** false quando a Meta não devolve o resultado por região (ex.: compras do pixel) */
+  regionResults: boolean;
+  ageResults: boolean;
+}
+
+/** "Mato Grosso do Sul (state)" -> "Mato Grosso do Sul"; "Federal District" -> "Distrito Federal" */
+export function cleanRegion(name: string): string {
+  const s = (name ?? "").replace(/\s*\((state|province|region|district)\)\s*$/i, "").trim();
+  if (/^federal district$/i.test(s)) return "Distrito Federal";
+  if (/^unknown$/i.test(s) || !s) return "Não identificado";
+  return s;
+}
+
+function summarize(rows: MetaInsight[], key: string, objetivo: Obj, label: (v: string) => string): AudienceRow[] {
+  const map = new Map<string, AudienceRow>();
+  for (const r of rows) {
+    const raw = String((r as any)[key] ?? "");
+    const lbl = label(raw);
+    const cur =
+      map.get(lbl) ??
+      { key: raw, label: lbl, spend: 0, impressions: 0, reach: 0, linkClicks: 0, results: 0, costPerResult: null, spendShare: 0, resultShare: 0 };
+    cur.spend += n(r.spend);
+    cur.impressions += n(r.impressions);
+    cur.reach += n(r.reach);
+    cur.linkClicks += n(r.inline_link_clicks);
+    cur.results += extractResult(r, objetivo).results;
+    map.set(lbl, cur);
+  }
+  const list = Array.from(map.values()).filter((x) => x.spend > 0 || x.impressions > 0);
+  const totS = list.reduce((a, x) => a + x.spend, 0);
+  const totR = list.reduce((a, x) => a + x.results, 0);
+  for (const x of list) {
+    x.costPerResult = x.results > 0 ? x.spend / x.results : null;
+    x.spendShare = totS > 0 ? (x.spend / totS) * 100 : 0;
+    x.resultShare = totR > 0 ? (x.results / totR) * 100 : 0;
+  }
+  return list;
+}
+
+export function buildAudience(regionRows: MetaInsight[], ageRows: MetaInsight[], objetivo: Obj): Audience {
+  const regions = summarize(regionRows, "region", objetivo, cleanRegion).sort((a, b) => b.spend - a.spend);
+  const ages = summarize(ageRows, "age", objetivo, (v) => (v === "Unknown" ? "Não informado" : v))
+    .filter((a) => a.label !== "Não informado" || a.spend > 0)
+    .sort((a, b) => a.label.localeCompare(b.label, "pt-BR", { numeric: true }));
+  return {
+    regions,
+    ages,
+    regionResults: regions.some((r) => r.results > 0),
+    ageResults: ages.some((r) => r.results > 0),
+  };
 }

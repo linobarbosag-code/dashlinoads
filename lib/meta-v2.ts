@@ -129,7 +129,7 @@ export async function getDaily(
   focus?: Focus | null
 ): Promise<MetaInsight[]> {
   const params: Record<string, string> = {
-    fields: "spend,impressions,clicks,actions,date_start,date_stop",
+    fields: "spend,impressions,clicks,inline_link_clicks,actions,date_start,date_stop",
     time_range: rangeParam(range),
     time_increment: "1",
     limit: "200",
@@ -147,10 +147,10 @@ export async function getBreakdown(
   focus?: Focus | null
 ): Promise<MetaInsight[]> {
   const params: Record<string, string> = {
-    fields: "spend,impressions,clicks,actions",
+    fields: "spend,impressions,reach,clicks,inline_link_clicks,actions",
     time_range: rangeParam(range),
     breakdowns: breakdown,
-    limit: "50",
+    limit: "100",
   };
   if (focus) params.filtering = filteringParam(focus);
   const json = await metaFetch(`/${adAccountId}/insights`, params);
@@ -229,32 +229,32 @@ export type Objetivo =
   | "infoproduto"
   | "leads"
   | "conversas"
+  | "leads_conversas"
+  | "perfil"
   | "engajamento";
 
-const ACTION_SETS: Record<Exclude<Objetivo, "auto">, string[]> = {
-  compras: ["purchase", "offsite_conversion.fb_pixel_purchase", "omni_purchase"],
-  infoproduto: ["purchase", "offsite_conversion.fb_pixel_purchase", "omni_purchase"],
-  leads: ["lead", "offsite_conversion.fb_pixel_lead", "onsite_conversion.lead_grouped"],
-  conversas: ["onsite_conversion.messaging_conversation_started_7d"],
+export type Obj = Exclude<Objetivo, "auto">;
+
+const LEAD_TYPES = ["lead", "offsite_conversion.fb_pixel_lead", "onsite_conversion.lead_grouped"];
+const CONV_TYPES = ["onsite_conversion.messaging_conversation_started_7d"];
+const PURCHASE_TYPES = ["purchase", "offsite_conversion.fb_pixel_purchase", "omni_purchase"];
+
+const ACTION_SETS: Record<"compras" | "infoproduto" | "leads" | "conversas" | "engajamento", string[]> = {
+  compras: PURCHASE_TYPES,
+  infoproduto: PURCHASE_TYPES,
+  leads: LEAD_TYPES,
+  conversas: CONV_TYPES,
   engajamento: ["post_engagement"],
 };
 
-const AUTO_ORDER: Exclude<Objetivo, "auto">[] = [
-  "compras",
-  "leads",
-  "conversas",
-  "engajamento",
-];
-
-export const RESULT_META: Record<
-  Exclude<Objetivo, "auto">,
-  { resultKey: string; custoKey: string; custoShort: string }
-> = {
+export const RESULT_META: Record<Obj, { resultKey: string; custoKey: string; custoShort: string }> = {
   compras: { resultKey: "Compras", custoKey: "Custo por compra", custoShort: "Custo/compra" },
   infoproduto: { resultKey: "Compras", custoKey: "Custo por compra", custoShort: "Custo/compra" },
   leads: { resultKey: "Leads", custoKey: "Custo por lead", custoShort: "CPL" },
   conversas: { resultKey: "Conversas", custoKey: "Custo por conversa", custoShort: "Custo/conv." },
-  engajamento: { resultKey: "Engajamentos", custoKey: "Custo por engaj.", custoShort: "Custo/eng." },
+  leads_conversas: { resultKey: "Contatos", custoKey: "Custo por contato", custoShort: "Custo/cont." },
+  perfil: { resultKey: "Visitas ao perfil", custoKey: "Custo por visita ao perfil", custoShort: "Custo/visita" },
+  engajamento: { resultKey: "Engajamentos", custoKey: "Custo por engajamento", custoShort: "Custo/eng." },
 };
 
 /** Valor de uma action (primeiro tipo encontrado da lista). */
@@ -270,23 +270,55 @@ function actionValue(insight: MetaInsight, types: string[]): number {
   return 0;
 }
 
-export function detectObjetivo(insight: MetaInsight): Exclude<Objetivo, "auto"> {
-  for (const obj of AUTO_ORDER) {
-    if (actionValue(insight, ACTION_SETS[obj]) > 0) return obj;
-  }
+/** Leads de formulário/site (sem conversas). */
+export function leadCount(i: MetaInsight): number {
+  return actionValue(i, LEAD_TYPES);
+}
+/** Conversas iniciadas (WhatsApp, Direct, Messenger). */
+export function conversationCount(i: MetaInsight): number {
+  return actionValue(i, CONV_TYPES);
+}
+
+/**
+ * Visitas ao perfil do Instagram em campanhas de tráfego com destino ao perfil.
+ * A Meta passou a expor a métrica em 2025, mas o nome do action_type não é estável na documentação:
+ * procuramos qualquer action de visita ao perfil; se não vier, usamos cliques no link
+ * (é assim que a Meta conta a visita em anúncios com destino ao perfil).
+ */
+export function profileVisitCount(i: MetaInsight): number {
+  const hit = i.actions?.find((a) => /profile_visit|ig_profile|instagram_profile/i.test(a.action_type));
+  if (hit) return Number(hit.value);
+  const lc = actionValue(i, ["link_click"]);
+  return lc || Number(i.inline_link_clicks || 0);
+}
+
+/** Todos os action_types presentes (diagnóstico). */
+export function actionTypes(i: MetaInsight): string[] {
+  return (i.actions ?? []).map((a) => a.action_type);
+}
+
+export function resultCount(i: MetaInsight, objetivo: Obj): number {
+  if (objetivo === "leads_conversas") return leadCount(i) + conversationCount(i);
+  if (objetivo === "perfil") return profileVisitCount(i);
+  return actionValue(i, ACTION_SETS[objetivo]);
+}
+
+export function detectObjetivo(insight: MetaInsight): Obj {
+  if (actionValue(insight, PURCHASE_TYPES) > 0) return "compras";
+  const l = leadCount(insight);
+  const c = conversationCount(insight);
+  if (l > 0 && c > 0) return "leads_conversas";
+  if (l > 0) return "leads";
+  if (c > 0) return "conversas";
+  if (insight.actions?.some((a) => /profile_visit|ig_profile|instagram_profile/i.test(a.action_type))) return "perfil";
+  if (actionValue(insight, ["post_engagement"]) > 0) return "engajamento";
   return "leads";
 }
 
-export function extractResult(
-  insight: MetaInsight,
-  objetivo: Exclude<Objetivo, "auto">
-): { results: number; costPerResult: number | null } {
-  const results = actionValue(insight, ACTION_SETS[objetivo]);
+export function extractResult(insight: MetaInsight, objetivo: Obj): { results: number; costPerResult: number | null } {
+  const results = resultCount(insight, objetivo);
   const spend = Number(insight.spend || 0);
-  return {
-    results,
-    costPerResult: results > 0 ? spend / results : null,
-  };
+  return { results, costPerResult: results > 0 ? spend / results : null };
 }
 
 export function extractRoas(insight: MetaInsight): number | null {
@@ -296,11 +328,9 @@ export function extractRoas(insight: MetaInsight): number | null {
 
 /** Valor de conversão (receita de compras atribuída pelo pixel). */
 export function extractConversionValue(insight: MetaInsight): number | null {
-  const values = (insight as any).action_values as
-    | { action_type: string; value: string }[]
-    | undefined;
+  const values = (insight as any).action_values as { action_type: string; value: string }[] | undefined;
   if (!values?.length) return null;
-  for (const t of ACTION_SETS.compras) {
+  for (const t of PURCHASE_TYPES) {
     const v = values.find((x) => x.action_type === t);
     if (v) return Number(v.value);
   }
@@ -308,44 +338,45 @@ export function extractConversionValue(insight: MetaInsight): number | null {
 }
 
 /** Etapas do funil montadas com as actions reais disponíveis. */
-export function buildFunnel(
-  insight: MetaInsight,
-  objetivo: Exclude<Objetivo, "auto">
-): { stage: string; value: number }[] {
-  const spend = Number(insight.spend || 0);
-  const stages: { stage: string; value: number }[] = [
-    { stage: "Impressões", value: Number(insight.impressions || 0) },
-    {
-      stage: "Cliques no link",
-      value: Number(insight.inline_link_clicks || insight.clicks || 0),
-    },
-  ];
-
-  const push = (label: string, types: string[]) => {
-    const v = actionValue(insight, types);
+export function buildFunnel(insight: MetaInsight, objetivo: Obj): { stage: string; value: number }[] {
+  const stages: { stage: string; value: number }[] = [{ stage: "Impressões", value: Number(insight.impressions || 0) }];
+  const push = (label: string, v: number) => {
     if (v > 0) stages.push({ stage: label, value: v });
   };
+  const linkClicks = Number(insight.inline_link_clicks || 0);
 
-  if (objetivo === "compras") {
-    push("Visualizou página", ["landing_page_view"]);
-    push("Adicionou ao carrinho", ["add_to_cart", "offsite_conversion.fb_pixel_add_to_cart", "omni_add_to_cart"]);
-    push("Iniciou checkout", ["initiate_checkout", "offsite_conversion.fb_pixel_initiate_checkout", "omni_initiated_checkout"]);
-    push("Compras", ACTION_SETS.compras);
-  } else if (objetivo === "infoproduto") {
-    push("Visualizou página", ["landing_page_view"]);
-    push("Iniciou checkout", ["initiate_checkout", "offsite_conversion.fb_pixel_initiate_checkout", "omni_initiated_checkout"]);
-    push("Compras", ACTION_SETS.infoproduto);
-  } else if (objetivo === "leads") {
-    push("Visualizou página", ["landing_page_view"]);
-    push("Leads", ACTION_SETS.leads);
-  } else if (objetivo === "conversas") {
-    push("Conversas iniciadas", ACTION_SETS.conversas);
-  } else {
-    push("Engajamentos", ACTION_SETS.engajamento);
-    push("Reações", ["post_reaction"]);
-    push("Comentários", ["comment"]);
+  if (objetivo === "perfil") {
+    push("Pessoas alcançadas", Number(insight.reach || 0));
+    push("Engajamentos", actionValue(insight, ["post_engagement"]));
+    push("Visitas ao perfil", profileVisitCount(insight));
+    return stages;
   }
-  void spend;
+  if (objetivo === "engajamento") {
+    push("Pessoas alcançadas", Number(insight.reach || 0));
+    push("Engajamentos", actionValue(insight, ["post_engagement"]));
+    push("Reações", actionValue(insight, ["post_reaction"]));
+    push("Comentários", actionValue(insight, ["comment"]));
+    return stages;
+  }
+
+  push("Cliques no link", linkClicks || Number(insight.clicks || 0));
+  if (objetivo === "compras") {
+    push("Visualizou página", actionValue(insight, ["landing_page_view"]));
+    push("Adicionou ao carrinho", actionValue(insight, ["add_to_cart", "offsite_conversion.fb_pixel_add_to_cart", "omni_add_to_cart"]));
+    push("Iniciou checkout", actionValue(insight, ["initiate_checkout", "offsite_conversion.fb_pixel_initiate_checkout", "omni_initiated_checkout"]));
+    push("Compras", actionValue(insight, PURCHASE_TYPES));
+  } else if (objetivo === "infoproduto") {
+    push("Visualizou página", actionValue(insight, ["landing_page_view"]));
+    push("Iniciou checkout", actionValue(insight, ["initiate_checkout", "offsite_conversion.fb_pixel_initiate_checkout", "omni_initiated_checkout"]));
+    push("Compras", actionValue(insight, PURCHASE_TYPES));
+  } else if (objetivo === "leads") {
+    push("Visualizou página", actionValue(insight, ["landing_page_view"]));
+    push("Leads", leadCount(insight));
+  } else if (objetivo === "conversas") {
+    push("Conversas iniciadas", conversationCount(insight));
+  } else if (objetivo === "leads_conversas") {
+    push("Contatos", leadCount(insight) + conversationCount(insight));
+  }
   return stages;
 }
 

@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useCallback } from "react";
-import { MetricsStrip, CampaignRanking, CreativeGallery, PeriodInsights, CreativeModal } from "@/components/perf-sections";
+import { MetricsStrip, CampaignRanking, CreativeGallery, PeriodInsights, CreativeModal, AudienceSection } from "@/components/perf-sections";
 
 interface Client {
   id: string;
@@ -40,6 +40,8 @@ const OBJ_OPTIONS = [
   { key: "infoproduto", label: "Infoproduto (Compras)" },
   { key: "leads", label: "Cadastro (Leads)" },
   { key: "conversas", label: "Mensagem (Conversas)" },
+  { key: "leads_conversas", label: "Leads + Conversas" },
+  { key: "perfil", label: "Visitas ao perfil (Instagram)" },
   { key: "engajamento", label: "Engajamento" },
 ];
 
@@ -892,6 +894,7 @@ export default function DashboardView({
               loading={loading}
             />
             <CreativeGallery creatives={data?.creatives ?? []} meta={meta} isAdmin={isAdmin} onOpen={setPreview} loading={loading} />
+            <AudienceSection audience={data?.audience} meta={meta} loading={loading} />
           </>
         )}
 

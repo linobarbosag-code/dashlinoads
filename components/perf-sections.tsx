@@ -107,6 +107,19 @@ export function MetricsStrip({ acc, prv, objetivo }: { acc: any; prv: any; objet
   if (m.convRate != null) tiles.push({ label: "Taxa de conversão", value: fPct(m.convRate), hint: "resultados ÷ cliques no link", delta: pctDelta(m.convRate, p?.convRate) });
   if ((objetivo === "compras" || objetivo === "infoproduto") && m.ticket != null)
     tiles.push({ label: "Ticket médio", value: fMoney2(m.ticket), hint: "valor por compra", delta: pctDelta(m.ticket, p?.ticket) });
+  if (objetivo === "leads_conversas") {
+    tiles.push({ label: "Leads", value: fInt(m.leads ?? 0), hint: "formulário / cadastro", delta: pctDelta(m.leads, p?.leads) });
+    tiles.push({ label: "Conversas", value: fInt(m.conversations ?? 0), hint: "WhatsApp / Direct iniciadas", delta: pctDelta(m.conversations, p?.conversations) });
+  }
+  if ((objetivo === "perfil" || objetivo === "engajamento") && m.engagement > 0) {
+    tiles.push({ label: "Engajamentos", value: fComp(m.engagement), hint: "interações com o anúncio", delta: pctDelta(m.engagement, p?.engagement) });
+    if (m.engagementRate != null) tiles.push({ label: "Taxa de engajamento", value: fPct(m.engagementRate, 1), hint: "engajamentos ÷ impressões", delta: pctDelta(m.engagementRate, p?.engagementRate) });
+    if (m.costPerEngagement != null && objetivo === "perfil") tiles.push({ label: "Custo por engajamento", value: fMoney2(m.costPerEngagement), hint: "investimento ÷ engajamentos", delta: pctDelta(m.costPerEngagement, p?.costPerEngagement), invert: true });
+    if (m.reactions > 0) tiles.push({ label: "Reações", value: fComp(m.reactions), hint: "curtidas e reações", delta: pctDelta(m.reactions, p?.reactions) });
+    if (m.comments > 0) tiles.push({ label: "Comentários", value: fComp(m.comments), hint: "nos anúncios", delta: pctDelta(m.comments, p?.comments) });
+    if (m.shares > 0) tiles.push({ label: "Compartilhamentos", value: fComp(m.shares), hint: "envios e compartilhamentos", delta: pctDelta(m.shares, p?.shares) });
+    if (m.saves > 0) tiles.push({ label: "Salvamentos", value: fComp(m.saves), hint: "salvaram o post", delta: pctDelta(m.saves, p?.saves) });
+  }
   if (m.hookRate != null) tiles.push({ label: "Gancho do vídeo", value: fPct(m.hookRate, 1), hint: "assistiram 3s ÷ impressões", delta: pctDelta(m.hookRate, p?.hookRate) });
   if (m.holdRate != null) tiles.push({ label: "Retenção do vídeo", value: fPct(m.holdRate, 1), hint: "ThruPlays ÷ views de 3s", delta: pctDelta(m.holdRate, p?.holdRate) });
 
@@ -458,6 +471,120 @@ export function CreativeModal({ c, meta, isAdmin, onClose }: { c: any; meta: { r
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// ================= Público: estados e idade =================
+
+type AudRow = { label: string; spend: number; impressions: number; reach: number; linkClicks: number; results: number; costPerResult: number | null; spendShare: number; resultShare: number };
+
+export function AudienceSection({
+  audience,
+  meta,
+  loading,
+}: {
+  audience: { regions: AudRow[]; ages: AudRow[]; regionResults: boolean; ageResults: boolean } | null | undefined;
+  meta: { resultKey: string; custoShort: string };
+  loading: boolean;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  if (!audience || (!audience.regions.length && !audience.ages.length)) {
+    if (!loading) return null;
+  }
+  const regions = audience?.regions ?? [];
+  const ages = audience?.ages ?? [];
+  const visible = showAll ? regions : regions.slice(0, 8);
+  const maxReg = Math.max(1, ...regions.map((r) => r.spendShare));
+  const maxAge = Math.max(1, ...ages.map((a) => Math.max(a.spendShare, a.resultShare)));
+  const resKey = meta.resultKey.toLowerCase();
+
+  return (
+    <div className="audience-grid" style={{ display: "grid", gap: 16, marginBottom: 16 }}>
+      <div style={{ ...CARD, padding: "20px 22px" }}>
+        <SectionHead
+          title="Onde está o público"
+          sub={audience?.regionResults ? `investimento e ${resKey} por estado` : "investimento e alcance por estado"}
+        />
+        <div className={`aud-row aud-head${audience?.regionResults ? "" : " aud-nores"}`}>
+          <span>Estado</span>
+          <span>Verba</span>
+          <span style={{ textAlign: "right" }}>Alcance</span>
+          {audience?.regionResults && <span style={{ textAlign: "right" }}>{meta.resultKey}</span>}
+          {audience?.regionResults && <span style={{ textAlign: "right" }}>{meta.custoShort}</span>}
+        </div>
+        {visible.map((r, i) => (
+          <div key={r.label} className={`aud-row${audience?.regionResults ? "" : " aud-nores"}`}>
+            <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              <span style={{ font: `700 10.5px ${DISPLAY}`, color: MUTED2, width: 16, flexShrink: 0 }}>{i + 1}</span>
+              <span style={{ font: `600 12.5px ${BODY}`, color: NAVY, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.label}</span>
+            </span>
+            <span style={{ display: "grid", gridTemplateColumns: "1fr 44px", alignItems: "center", gap: 6 }}>
+              <span style={{ height: 7, background: "#F1F2F7", borderRadius: 6, overflow: "hidden" }}>
+                <span style={{ display: "block", height: "100%", width: `${(r.spendShare / maxReg) * 100}%`, background: GRAD, borderRadius: 6 }} />
+              </span>
+              <span style={{ font: `700 11px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{fPct(r.spendShare, r.spendShare < 1 ? 1 : 0)}</span>
+            </span>
+            <span style={{ font: `600 12px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{fComp(r.reach)}</span>
+            {audience?.regionResults && <span style={{ font: `700 12.5px ${DISPLAY}`, color: NAVY, textAlign: "right" }}>{fInt(r.results)}</span>}
+            {audience?.regionResults && (
+              <span style={{ font: `600 12px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{r.costPerResult != null ? fMoney2(r.costPerResult) : "—"}</span>
+            )}
+          </div>
+        ))}
+        {loading && !regions.length && <div style={{ font: `500 12px ${BODY}`, color: MUTED, padding: 12 }}>Carregando…</div>}
+        {regions.length > 8 && (
+          <button
+            onClick={() => setShowAll((v) => !v)}
+            style={{ marginTop: 10, background: "none", border: "none", cursor: "pointer", font: `700 11.5px ${BODY}`, color: "#E8336E", padding: 0 }}
+          >
+            {showAll ? "Mostrar menos" : `Ver todos os ${regions.length} estados`}
+          </button>
+        )}
+        {!audience?.regionResults && regions.length > 0 && (
+          <div style={{ font: `500 10.5px ${BODY}`, color: MUTED, marginTop: 10 }}>
+            A Meta não informa {resKey} por estado para esse tipo de conversão — mostramos onde a verba e o alcance foram entregues.
+          </div>
+        )}
+      </div>
+
+      <div style={{ ...CARD, padding: "20px 22px" }}>
+        <SectionHead title="Faixa etária" sub={audience?.ageResults ? `verba x ${resKey} por idade` : "distribuição da verba por idade"} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+          {ages.map((a) => (
+            <div key={a.label} style={{ display: "grid", gridTemplateColumns: "54px 1fr", alignItems: "center", gap: 10 }}>
+              <span style={{ font: `700 12px ${DISPLAY}`, color: NAVY }}>{a.label}</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 40px", alignItems: "center", gap: 6 }}>
+                  <span style={{ height: 7, background: "#F1F2F7", borderRadius: 6, overflow: "hidden" }}>
+                    <span style={{ display: "block", height: "100%", width: `${(a.spendShare / maxAge) * 100}%`, background: "#C9CBD6", borderRadius: 6 }} />
+                  </span>
+                  <span style={{ font: `600 10.5px ${DISPLAY}`, color: MUTED, textAlign: "right" }}>{fPct(a.spendShare, 0)}</span>
+                </div>
+                {audience?.ageResults && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 40px", alignItems: "center", gap: 6 }}>
+                    <span style={{ height: 7, background: "#F1F2F7", borderRadius: 6, overflow: "hidden" }}>
+                      <span style={{ display: "block", height: "100%", width: `${(a.resultShare / maxAge) * 100}%`, background: GRAD, borderRadius: 6 }} />
+                    </span>
+                    <span style={{ font: `700 10.5px ${DISPLAY}`, color: INK2, textAlign: "right" }}>{fPct(a.resultShare, 0)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+          {!ages.length && !loading && <span style={{ font: `500 12px ${BODY}`, color: MUTED }}>Sem dados no período.</span>}
+        </div>
+        {audience?.ageResults && ages.length > 0 && (
+          <div style={{ display: "flex", gap: 14, marginTop: 14, font: `600 10.5px ${BODY}`, color: MUTED }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 10, height: 6, borderRadius: 3, background: "#C9CBD6" }} /> Verba
+            </span>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ width: 10, height: 6, borderRadius: 3, background: GRAD }} /> {meta.resultKey}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
