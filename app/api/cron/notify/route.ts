@@ -59,13 +59,20 @@ export async function GET(req: NextRequest) {
         // TRAVA ANTES DO ENVIO: grava a marca primeiro e só então dispara.
         // Se o envio falhar ou o watchdog cortar, NÃO reenviamos automaticamente —
         // para mensagem de cliente, perder um relatório é muito melhor que duplicar.
-        const { error: lockErr } = await db
+        // Cliente novo (nunca enviado): last_weekly_sent é NULL e precisa de IS NULL —
+        // .eq(col, null) vira "eq.null" no PostgREST, dá erro de timestamp e o cliente era pulado para sempre.
+        let lockQ = db
           .from("notification_settings")
           .update({ last_weekly_sent: new Date().toISOString() })
-          .eq("client_id", client.id)
-          .eq("last_weekly_sent", s.last_weekly_sent); // só grava se ninguém marcou antes
-        if (lockErr) {
-          console.log(`[notify] não consegui travar ${tag}, pulando: ${lockErr.message}`);
+          .eq("client_id", client.id);
+        lockQ = s.last_weekly_sent === null ? lockQ.is("last_weekly_sent", null) : lockQ.eq("last_weekly_sent", s.last_weekly_sent);
+        const { data: locked, error: lockErr } = await lockQ.select("client_id"); // só grava se ninguém marcou antes
+        if (lockErr || !locked?.length) {
+          const why = lockErr ? lockErr.message : "outra rodada já marcou";
+          console.log(`[notify] não consegui travar ${tag}, pulando: ${why}`);
+          if (lockErr) {
+            await db.from("notification_log").insert({ client_id: client.id, type: "weekly_report", status: "error", detail: `Trava não gravada: ${lockErr.message}` });
+          }
           continue;
         }
         sentThisRun++;
