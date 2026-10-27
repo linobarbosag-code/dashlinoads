@@ -2,7 +2,7 @@
 // ?client_id=...&since=YYYY-MM-DD&until=YYYY-MM-DD&objetivo=auto|...
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { previousRange, type Objetivo } from "@/lib/meta-v2";
+import { previousRange, type Objetivo, type Focus } from "@/lib/meta-v2";
 import { collectReport } from "@/lib/report-data";
 import { buildReportPdf } from "@/lib/report-pdf";
 
@@ -28,6 +28,21 @@ export async function GET(req: NextRequest) {
     .single();
   if (!client) return NextResponse.json({ error: "Acesso negado" }, { status: 403 });
 
+  // Filtro opcional vindo do dashboard (campanha, conjunto ou anúncio)
+  const focusType = sp.get("focus_type");
+  const focusIds = (sp.get("focus_ids") ?? "").split(",").map((s) => s.trim()).filter((s) => /^\d+$/.test(s));
+  const focus: Focus | null =
+    focusType && focusIds.length && ["campaign", "adset", "ad"].includes(focusType)
+      ? { type: focusType as Focus["type"], ids: focusIds }
+      : null;
+  const focusNames = sp.getAll("focus_name").map((s) => s.trim()).filter(Boolean);
+  const kind = focus?.type === "adset" ? ["Conjunto", "conjuntos"] : focus?.type === "ad" ? ["Anúncio", "anúncios"] : ["Campanha", "campanhas"];
+  const scopeLabel = focus
+    ? focus.ids.length === 1 && focusNames[0]
+      ? `${kind[0]}: ${focusNames[0]}`
+      : `${focus.ids.length} ${kind[1]} selecionad${focus.type === "ad" ? "os" : "as"}`
+    : null;
+
   const range = { since, until };
   const d = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
   try {
@@ -39,13 +54,15 @@ export async function GET(req: NextRequest) {
       compareLabel: "período anterior",
       deltaSuffix: "vs período anterior",
       objetivoOverride: (sp.get("objetivo") as Objetivo) ?? null,
+      focus,
+      scopeLabel,
     });
-    if (r.skipped) return NextResponse.json({ error: r.reason }, { status: 400 });
+    if (r.skipped) return NextResponse.json({ error: focus ? `${r.reason} para o filtro escolhido` : r.reason }, { status: 400 });
     const pdf = await buildReportPdf(r.data);
     return new NextResponse(Buffer.from(pdf), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="Relatorio_${client.name.replace(/[^\w]+/g, "_")}_${since}_${until}.pdf"`,
+        "Content-Disposition": `attachment; filename="Relatorio_${client.name.replace(/[^\w]+/g, "_")}${focus ? "_" + (focusNames.length === 1 ? focusNames[0] : kind[1]).normalize("NFD").replace(/[^\w]+/g, "_").slice(0, 40) : ""}_${since}_${until}.pdf"`,
         "Cache-Control": "no-store",
       },
     });
