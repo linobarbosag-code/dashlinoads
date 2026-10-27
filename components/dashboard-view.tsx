@@ -369,6 +369,12 @@ export default function DashboardView({
     setPdfLoading(true);
     try {
       const q = new URLSearchParams({ client_id: client.id, since: rangeStart, until: rangeEnd, objetivo });
+      // PDF respeita o filtro do topo (campanha, conjunto ou anúncio)
+      if (focus) {
+        q.set("focus_type", focus.type);
+        q.set("focus_ids", focus.ids.join(","));
+        focus.names.forEach((n) => q.append("focus_name", n));
+      }
       const res = await fetch(`/api/report?${q}`);
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
@@ -378,7 +384,8 @@ export default function DashboardView({
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `Relatorio_${client.name.replace(/\s+/g, "_")}_${rangeStart}_${rangeEnd}.pdf`;
+      const scope = focus ? "_" + (focus.ids.length === 1 ? focus.names[0] : `${focus.ids.length}_${focus.type === "campaign" ? "campanhas" : focus.type === "adset" ? "conjuntos" : "anuncios"}`).replace(/\s+/g, "_").slice(0, 40) : "";
+      a.download = `Relatorio_${client.name.replace(/\s+/g, "_")}${scope}_${rangeStart}_${rangeEnd}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -644,7 +651,7 @@ export default function DashboardView({
             style={{ border: "none", cursor: pdfLoading ? "wait" : "pointer", background: NAVY, color: "#fff", borderRadius: 13, padding: "12px 18px", font: `600 13px ${BODY}`, display: "flex", alignItems: "center", gap: 8, opacity: pdfLoading ? 0.7 : 1 }}
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16" /></svg>
-            {pdfLoading ? "Gerando PDF..." : "Exportar PDF"}
+            {pdfLoading ? "Gerando PDF..." : focus?.type === "campaign" && focus.ids.length === 1 ? "Exportar PDF da campanha" : focus ? "Exportar PDF do filtro" : "Exportar PDF"}
           </button>
         </div>
 
