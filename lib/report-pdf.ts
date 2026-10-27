@@ -83,6 +83,8 @@ export interface ReportData {
   clientName: string;
   periodLabel: string;
   platformLabel: string;
+  /** Recorte do relatório (campanha/conjunto/anúncio filtrado). null = conta inteira */
+  scopeLabel?: string | null;
   resultKey: string;
   custoShort: string;
   headline: string;
@@ -249,6 +251,7 @@ function header(page: PDFPage, f: Fonts, d: ReportData, logo: PDFImage | null, s
   txt(page, `RELATÓRIO DE DESEMPENHO · ${d.platformLabel}`, M + 50, H - 48, 6.5, f.bold, hex("#B9B6D3"));
   txtR(page, fit(f.bold, d.clientName, 13, 240), W - M, H - 34, 13, f.bold, WHITE);
   txtR(page, d.periodLabel, W - M, H - 48, 8.5, f.reg, hex("#CFCDE3"));
+  if (d.scopeLabel) txtR(page, fit(f.bold, d.scopeLabel, 7, 300), W - M, H - 60, 7, f.bold, YELLOW);
   // título da seção
   txt(page, section, M, H - 100, 13, f.bold, NAVY);
 }
@@ -682,6 +685,7 @@ export async function buildReportPdf(input: ReportData): Promise<Uint8Array> {
     clientName: S(input.clientName),
     periodLabel: S(input.periodLabel),
     platformLabel: S(input.platformLabel),
+    scopeLabel: input.scopeLabel ? S(input.scopeLabel) : null,
     resultKey: S(input.resultKey),
     custoShort: S(input.custoShort),
     headline: S(input.headline),
