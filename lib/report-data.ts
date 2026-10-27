@@ -11,6 +11,7 @@ import {
   RESULT_META,
   type Objetivo,
   type Range,
+  type Focus,
 } from "@/lib/meta-v2";
 import { deriveMetrics, rankEntities, buildInsights, buildAudience, type Obj, type Metrics, type Ranked } from "@/lib/analysis";
 import type { ReportData, ReportImage, ReportAudience } from "@/lib/report-pdf";
@@ -85,18 +86,23 @@ export async function collectReport(opts: {
   compareLabel: string; // "mesmo período do mês anterior" | "período anterior"
   deltaSuffix: string; // "vs mês anterior" | "vs período anterior"
   objetivoOverride?: Objetivo | null;
+  /** Filtro do dashboard: relatório só das campanhas/conjuntos/anúncios escolhidos */
+  focus?: Focus | null;
+  /** Texto exibido no cabeçalho do PDF, ex.: "Campanha: Black Friday" */
+  scopeLabel?: string | null;
 }): Promise<{ skipped: true; reason: string } | { skipped: false; data: ReportData; summary: ReportSummary }> {
   const { client, range, prevRange } = opts;
   const acct = client.ad_account_id;
+  const focus = opts.focus ?? null;
 
   const [curArr, prevArr, campRows, adRows, dailyRows, regionRows, ageRows] = await Promise.all([
-    getInsights(acct, range, "account"),
-    getInsights(acct, prevRange, "account"),
-    getInsights(acct, range, "campaign"),
-    getInsights(acct, range, "ad"),
-    getDaily(acct, range).catch(() => []),
-    getBreakdown(acct, range, "region").catch(() => []),
-    getBreakdown(acct, range, "age,gender").catch(() => []),
+    getInsights(acct, range, "account", focus),
+    getInsights(acct, prevRange, "account", focus),
+    getInsights(acct, range, "campaign", focus),
+    getInsights(acct, range, "ad", focus),
+    getDaily(acct, range, focus).catch(() => []),
+    getBreakdown(acct, range, "region", focus).catch(() => []),
+    getBreakdown(acct, range, "age,gender", focus).catch(() => []),
   ]);
   const cur = curArr[0];
   if (!cur || Number(cur.spend) === 0) return { skipped: true, reason: "Sem veiculação no período" };
@@ -278,6 +284,7 @@ export async function collectReport(opts: {
     clientName: client.name,
     periodLabel: opts.periodLabel,
     platformLabel: "META ADS",
+    scopeLabel: opts.scopeLabel ?? null,
     resultKey: meta.resultKey,
     custoShort: meta.custoShort,
     headline,
