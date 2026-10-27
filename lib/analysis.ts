@@ -251,7 +251,10 @@ export function buildInsights(opts: {
       previous.costPerResult && account.costPerResult
         ? ((account.costPerResult - previous.costPerResult) / previous.costPerResult) * 100
         : null;
-    const resPart = `${meta.resultKey} ${dRes >= 0 ? "cresceram" : "caíram"} ${pctFmt(dRes)} em relação ao ${compareLabel}`;
+    const resPart =
+      Math.abs(dRes) < 1
+        ? `${meta.resultKey} ficaram estáveis em relação ao ${compareLabel}`
+        : `${meta.resultKey} ${dRes >= 0 ? "cresceram" : "caíram"} ${pctFmt(dRes)} em relação ao ${compareLabel}`;
     const cprPart =
       dCpr !== null && Math.abs(dCpr) >= 1
         ? `, com ${unit} ${pctFmt(dCpr)} ${dCpr < 0 ? "menor" : "maior"}`
@@ -260,7 +263,8 @@ export function buildInsights(opts: {
   }
 
   const topCamp = campaigns.find((c) => c.badges.includes("most_results"));
-  if (topCamp && topCamp.m.results > 0) {
+  // Com uma campanha só (relatório filtrado), "100% do total com 100% da verba" não diz nada
+  if (topCamp && topCamp.m.results > 0 && campaigns.length > 1) {
     const eff =
       topCamp.index !== null && topCamp.index >= 110
         ? `, com ${unit} ${pctFmt(100 - 10000 / topCamp.index)} abaixo da média da conta`
