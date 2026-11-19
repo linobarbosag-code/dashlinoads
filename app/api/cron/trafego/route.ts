@@ -25,6 +25,8 @@ export const maxDuration = 300;
 
 const DIAS_REPROCESSADOS = 3;
 const PAUSA_ENTRE_CONTAS_MS = 1500;
+const DIAS_HISTORICO = 100;
+const HISTORICOS_POR_EXECUCAO = 3;
 
 /** Data local (America/Campo_Grande, UTC-4 sem horário de verão), deslocada em dias. */
 function dataLocal(deslocamentoDias = 0): string {
@@ -94,6 +96,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: erroClientes.message }, { status: 500 });
   }
 
+  const { data: marcas } = await db
+    .from("trafego_metas")
+    .select("client_id")
+    .not("historico_carregado_em", "is", null);
+  const comHistorico = new Set((marcas ?? []).map((m: { client_id: string }) => m.client_id));
+  let historicosNestaExecucao = 0;
+
   const erros: Record<string, string> = {};
   let ok = 0;
 
@@ -148,6 +157,26 @@ export async function GET(req: NextRequest) {
           .from("trafego_metricas")
           .upsert(linhas.slice(i, i + 500), { onConflict: "data,client_id,nivel,entidade_id" });
         if (erroMetricas) throw new Error(`trafego_metricas: ${erroMetricas.message}`);
+      }
+
+      // 4) Histórico de 100 dias (só campanha), uma vez por cliente e poucas contas por execução.
+      //    É a base da média de 90 dias usada como referência no diagnóstico.
+      if (!comHistorico.has(client.id) && historicosNestaExecucao < HISTORICOS_POR_EXECUCAO) {
+        historicosNestaExecucao++;
+        const antigo: Range = { since: dataLocal(-DIAS_HISTORICO), until: dataLocal(-DIAS_REPROCESSADOS - 1) };
+        const historico = (await getDailyByLevel(client.ad_account_id, antigo, "campaign"))
+          .map((i) => linhaMetrica(i, client.id, "campanha", objetivo, statusPorAnuncio))
+          .filter(Boolean);
+        for (let i = 0; i < historico.length; i += 500) {
+          const { error: erroHistorico } = await db
+            .from("trafego_metricas")
+            .upsert(historico.slice(i, i + 500), { onConflict: "data,client_id,nivel,entidade_id" });
+          if (erroHistorico) throw new Error(`histórico: ${erroHistorico.message}`);
+        }
+        const { error: erroMarca } = await db
+          .from("trafego_metas")
+          .upsert({ client_id: client.id, historico_carregado_em: new Date().toISOString() }, { onConflict: "client_id" });
+        if (erroMarca) throw new Error(`trafego_metas: ${erroMarca.message}`);
       }
       ok++;
     } catch (err: any) {
