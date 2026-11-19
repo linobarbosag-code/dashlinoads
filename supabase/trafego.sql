@@ -170,9 +170,10 @@ create policy "admin le relatorios" on trafego_relatorios for select using (is_a
 create view trafego_clientes with (security_invoker = true) as
 select c.id as client_id, c.name as cliente, c.ad_account_id as conta_anuncio, c.objetivo,
   m.verba_diaria, m.orcamento_mensal, m.meta_custo_resultado, m.meta_cpc, m.meta_roas,
-  m.grupo_whatsapp, m.observacoes
+  coalesce(m.grupo_whatsapp, ns.group_name) as grupo_whatsapp, m.observacoes
 from clients c
 left join trafego_metas m on m.client_id = c.id
+left join notification_settings ns on ns.client_id = c.id
 where c.active and coalesce(m.monitorar, true);
 
 -- Diagnóstico diário: uma linha por cliente e por item, dizendo se está dentro ou fora de ordem.
