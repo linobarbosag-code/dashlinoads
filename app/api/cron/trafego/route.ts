@@ -1,0 +1,173 @@
+// app/api/cron/trafego/route.ts
+// Alimenta a Central de Tráfego (tabelas trafego_*), lida pelos agentes.
+// A cada hora grava, por conta ativa:
+//   - métricas por dia, por campanha e por anúncio (últimos 3 dias, para pegar a consolidação da Meta);
+//   - a situação da conta: status, saldo e anúncios reprovados.
+// Só leitura na Meta. Usa service role e valida CRON_SECRET.
+
+import { NextRequest, NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/server";
+import {
+  getAccountInfo,
+  getDailyByLevel,
+  getInsights,
+  listEntities,
+  detectObjetivo,
+  resultCount,
+  extractConversionValue,
+  RESULT_META,
+  type MetaInsight,
+  type Obj,
+  type Range,
+} from "@/lib/meta-v2";
+
+export const maxDuration = 300;
+
+const DIAS_REPROCESSADOS = 3;
+const PAUSA_ENTRE_CONTAS_MS = 1500;
+
+/** Data local (America/Campo_Grande, UTC-4 sem horário de verão), deslocada em dias. */
+function dataLocal(deslocamentoDias = 0): string {
+  const d = new Date(Date.now() - 4 * 3600e3 + deslocamentoDias * 86400e3);
+  return d.toISOString().slice(0, 10);
+}
+
+// account_status da Meta: 1 ativa, 2 desativada, 3 não quitada, 7 em análise de risco,
+// 8 quitação pendente, 9 período de carência, 100 fechamento pendente, 101 fechada.
+function statusConta(codigo: number): string {
+  if (codigo === 1) return "ativa";
+  if (codigo === 2) return "desativada";
+  if (codigo === 3 || codigo === 8 || codigo === 9) return "pagamento_pendente";
+  if (codigo === 7) return "em_analise";
+  if (codigo === 100 || codigo === 101) return "encerrada";
+  return "outro";
+}
+
+const num = (v: unknown) => Number(v || 0);
+
+function linhaMetrica(
+  i: MetaInsight,
+  clientId: string,
+  nivel: "campanha" | "anuncio",
+  objetivo: Obj,
+  statusPorAnuncio: Map<string, string>
+) {
+  const entidadeId = nivel === "campanha" ? i.campaign_id : i.ad_id;
+  if (!entidadeId) return null;
+  return {
+    data: i.date_start,
+    client_id: clientId,
+    nivel,
+    entidade_id: entidadeId,
+    campanha: i.campaign_name ?? null,
+    conjunto: nivel === "anuncio" ? i.adset_name ?? null : null,
+    anuncio: nivel === "anuncio" ? i.ad_name ?? null : null,
+    status_veiculacao: nivel === "anuncio" ? statusPorAnuncio.get(entidadeId) ?? null : null,
+    gasto: num(i.spend),
+    impressoes: num(i.impressions),
+    alcance: i.reach != null ? num(i.reach) : null,
+    frequencia: i.frequency != null ? num(i.frequency) : null,
+    cliques_link: num(i.inline_link_clicks),
+    resultados: resultCount(i, objetivo),
+    tipo_resultado: RESULT_META[objetivo].resultKey,
+    valor_compras: extractConversionValue(i),
+    coletado_em: new Date().toISOString(),
+  };
+}
+
+export async function GET(req: NextRequest) {
+  if (req.headers.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const db = createAdminClient();
+  const hoje = dataLocal(0);
+  const janela: Range = { since: dataLocal(-DIAS_REPROCESSADOS), until: hoje };
+
+  const { data: coleta } = await db.from("trafego_coletas").insert({}).select("id").single();
+
+  const { data: clients, error: erroClientes } = await db
+    .from("clients")
+    .select("id, name, ad_account_id, objetivo")
+    .eq("active", true);
+  if (erroClientes) {
+    return NextResponse.json({ error: erroClientes.message }, { status: 500 });
+  }
+
+  const erros: Record<string, string> = {};
+  let ok = 0;
+
+  for (const client of clients ?? []) {
+    try {
+      // 1) Situação da conta e anúncios reprovados
+      const info = await getAccountInfo(client.ad_account_id);
+      const anuncios = await listEntities(client.ad_account_id, "ads");
+      const statusPorAnuncio = new Map(anuncios.map((a) => [a.id, a.status]));
+      const reprovados = anuncios.filter((a) => a.status === "DISAPPROVED");
+      const comProblema = anuncios.filter((a) => a.status === "WITH_ISSUES");
+      const afetados = [...reprovados, ...comProblema].slice(0, 5).map((a) => a.name).join("; ");
+
+      const { error: erroConta } = await db.from("trafego_contas").upsert(
+        {
+          data: hoje,
+          client_id: client.id,
+          status_conta: statusConta(info.accountStatus),
+          status_codigo: info.accountStatus,
+          pre_pago: info.isPrepaid,
+          saldo_disponivel: info.available,
+          valor_em_aberto: info.balance,
+          moeda: info.currency,
+          anuncios_reprovados: reprovados.length,
+          anuncios_com_problema: comProblema.length,
+          anuncios_afetados: afetados || null,
+          coletado_em: new Date().toISOString(),
+        },
+        { onConflict: "data,client_id" }
+      );
+      if (erroConta) throw new Error(`trafego_contas: ${erroConta.message}`);
+
+      // 2) Objetivo: o cadastrado ou, em "auto", o detectado no total da janela
+      let objetivo: Obj;
+      if (client.objetivo && client.objetivo !== "auto") {
+        objetivo = client.objetivo as Obj;
+      } else {
+        const [total] = await getInsights(client.ad_account_id, janela, "account");
+        objetivo = total ? detectObjetivo(total) : "leads";
+      }
+
+      // 3) Métricas por dia, por campanha e por anúncio
+      const porCampanha = await getDailyByLevel(client.ad_account_id, janela, "campaign");
+      const porAnuncio = await getDailyByLevel(client.ad_account_id, janela, "ad");
+      const linhas = [
+        ...porCampanha.map((i) => linhaMetrica(i, client.id, "campanha", objetivo, statusPorAnuncio)),
+        ...porAnuncio.map((i) => linhaMetrica(i, client.id, "anuncio", objetivo, statusPorAnuncio)),
+      ].filter(Boolean);
+
+      for (let i = 0; i < linhas.length; i += 500) {
+        const { error: erroMetricas } = await db
+          .from("trafego_metricas")
+          .upsert(linhas.slice(i, i + 500), { onConflict: "data,client_id,nivel,entidade_id" });
+        if (erroMetricas) throw new Error(`trafego_metricas: ${erroMetricas.message}`);
+      }
+      ok++;
+    } catch (err: any) {
+      // Uma conta com erro ou rate limit não derruba as outras
+      erros[client.name ?? client.ad_account_id] = err?.message ?? String(err);
+    }
+    await new Promise((r) => setTimeout(r, PAUSA_ENTRE_CONTAS_MS));
+  }
+
+  if (coleta?.id) {
+    await db
+      .from("trafego_coletas")
+      .update({
+        fim: new Date().toISOString(),
+        contas_ok: ok,
+        contas_com_erro: Object.keys(erros).length,
+        erros: Object.keys(erros).length ? erros : null,
+      })
+      .eq("id", coleta.id);
+  }
+
+  return NextResponse.json({ contas_ok: ok, erros });
+}

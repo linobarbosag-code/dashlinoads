@@ -122,6 +122,30 @@ export async function getInsights(
   return all;
 }
 
+/** Uma linha por dia e por entidade (campanha ou anúncio), com paginação. Usado pela Central de Tráfego. */
+export async function getDailyByLevel(
+  adAccountId: string,
+  range: Range,
+  level: "campaign" | "ad"
+): Promise<MetaInsight[]> {
+  const all: MetaInsight[] = [];
+  let json = await metaFetch(`/${adAccountId}/insights`, {
+    fields: LEVEL_FIELDS[level],
+    time_range: rangeParam(range),
+    time_increment: "1",
+    level,
+    limit: "200",
+  });
+  all.push(...(json.data ?? []));
+  while (json.paging?.next && all.length < 3000) {
+    const res = await fetch(json.paging.next);
+    json = await res.json();
+    if (json.error) throw new Error(`Meta API [${json.error.code}]: ${json.error.message}`);
+    all.push(...(json.data ?? []));
+  }
+  return all;
+}
+
 /** Série diária (gráficos). */
 export async function getDaily(
   adAccountId: string,
