@@ -447,3 +447,67 @@ export async function getCreatives(adIds: string[]): Promise<Record<string, Crea
   }
   return out;
 }
+
+export interface CreativeMedia {
+  tipo: "imagem" | "video" | "outro";
+  imagem: string | null;
+  video: string | null;
+  miniatura: string | null;
+  permalink: string | null;
+  previewLink: string | null;
+  titulo: string | null;
+  texto: string | null;
+  status: string | null;
+}
+
+/**
+ * Mídia de uma lista de anúncios para a Central de Tráfego: imagem, miniatura, links e,
+ * quando a Meta libera, o arquivo do vídeo. As URLs de mídia expiram, por isso a coleta renova a cada hora.
+ * O arquivo do vídeo depende de permissão sobre a página dona do vídeo: se a Meta negar, `video` fica null
+ * e sobram a miniatura e os links.
+ */
+export async function getCreativeMedia(adIds: string[]): Promise<Record<string, CreativeMedia>> {
+  const ids = Array.from(new Set(adIds.filter(Boolean)));
+  const out: Record<string, CreativeMedia> = {};
+  const videoPorAnuncio: Record<string, string> = {};
+  const FIELDS =
+    "effective_status,preview_shareable_link,creative.thumbnail_width(600).thumbnail_height(600){thumbnail_url,image_url,instagram_permalink_url,object_type,video_id,body,title}";
+
+  for (let i = 0; i < ids.length; i += 50) {
+    const chunk = ids.slice(i, i + 50);
+    const json = await metaFetch(`/`, { ids: chunk.join(","), fields: FIELDS });
+    for (const id of chunk) {
+      const ad = json[id] ?? {};
+      const c = ad.creative ?? {};
+      const ehVideo = Boolean(c.video_id) || c.object_type === "VIDEO";
+      if (c.video_id) videoPorAnuncio[id] = String(c.video_id);
+      out[id] = {
+        tipo: ehVideo ? "video" : c.image_url || c.thumbnail_url ? "imagem" : "outro",
+        imagem: ehVideo ? null : c.image_url ?? null,
+        video: null,
+        miniatura: c.thumbnail_url ?? null,
+        permalink: c.instagram_permalink_url ?? null,
+        previewLink: ad.preview_shareable_link ?? null,
+        titulo: c.title ?? null,
+        texto: c.body ?? null,
+        status: ad.effective_status ?? null,
+      };
+    }
+  }
+
+  const videoIds = Array.from(new Set(Object.values(videoPorAnuncio)));
+  const fontes: Record<string, string> = {};
+  for (let i = 0; i < videoIds.length; i += 50) {
+    const chunk = videoIds.slice(i, i + 50);
+    try {
+      const json = await metaFetch(`/`, { ids: chunk.join(","), fields: "source" });
+      for (const vid of chunk) if (json[vid]?.source) fontes[vid] = json[vid].source;
+    } catch {
+      // Sem permissão sobre a página dona do vídeo: segue só com miniatura e links.
+    }
+  }
+  for (const [adId, vid] of Object.entries(videoPorAnuncio)) {
+    if (fontes[vid]) out[adId].video = fontes[vid];
+  }
+  return out;
+}

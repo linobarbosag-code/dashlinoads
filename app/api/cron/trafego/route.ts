@@ -9,6 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import {
   getAccountInfo,
+  getCreativeMedia,
   getDailyByLevel,
   getInsights,
   listEntities,
@@ -104,6 +105,7 @@ export async function GET(req: NextRequest) {
   let historicosNestaExecucao = 0;
 
   const erros: Record<string, string> = {};
+  const avisos: Record<string, string> = {};
   let ok = 0;
 
   for (const client of clients ?? []) {
@@ -159,6 +161,38 @@ export async function GET(req: NextRequest) {
         if (erroMetricas) throw new Error(`trafego_metricas: ${erroMetricas.message}`);
       }
 
+      // 3b) Arte dos anúncios com gasto na janela (imagem, vídeo, miniatura e links).
+      //     Falha aqui não invalida a coleta da conta: fica registrada como aviso.
+      try {
+        const idsComGasto = Array.from(
+          new Set(porAnuncio.filter((i) => num(i.spend) > 0 && i.ad_id).map((i) => i.ad_id as string))
+        );
+        const nomes = new Map(porAnuncio.map((i) => [i.ad_id as string, i]));
+        const midias = await getCreativeMedia(idsComGasto);
+        const criativos = idsComGasto.map((id) => ({
+          ad_id: id,
+          client_id: client.id,
+          anuncio: nomes.get(id)?.ad_name ?? null,
+          campanha: nomes.get(id)?.campaign_name ?? null,
+          tipo: midias[id]?.tipo ?? "outro",
+          imagem_url: midias[id]?.imagem ?? null,
+          video_url: midias[id]?.video ?? null,
+          miniatura_url: midias[id]?.miniatura ?? null,
+          link_instagram: midias[id]?.permalink ?? null,
+          link_previa: midias[id]?.previewLink ?? null,
+          titulo: midias[id]?.titulo ?? null,
+          texto: midias[id]?.texto ?? null,
+          status_veiculacao: midias[id]?.status ?? null,
+          atualizado_em: new Date().toISOString(),
+        }));
+        if (criativos.length) {
+          const { error: erroCriativos } = await db.from("trafego_criativos").upsert(criativos, { onConflict: "ad_id" });
+          if (erroCriativos) throw new Error(erroCriativos.message);
+        }
+      } catch (err: any) {
+        avisos[client.name ?? client.ad_account_id] = `criativos: ${err?.message ?? String(err)}`;
+      }
+
       // 4) Histórico de 100 dias (só campanha), uma vez por cliente e poucas contas por execução.
       //    É a base da média de 90 dias usada como referência no diagnóstico.
       if (!comHistorico.has(client.id) && historicosNestaExecucao < HISTORICOS_POR_EXECUCAO) {
@@ -193,10 +227,13 @@ export async function GET(req: NextRequest) {
         fim: new Date().toISOString(),
         contas_ok: ok,
         contas_com_erro: Object.keys(erros).length,
-        erros: Object.keys(erros).length ? erros : null,
+        erros:
+          Object.keys(erros).length || Object.keys(avisos).length
+            ? { ...erros, ...(Object.keys(avisos).length ? { avisos } : {}) }
+            : null,
       })
       .eq("id", coleta.id);
   }
 
-  return NextResponse.json({ contas_ok: ok, erros });
+  return NextResponse.json({ contas_ok: ok, erros, avisos });
 }
